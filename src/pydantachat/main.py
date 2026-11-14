@@ -3,12 +3,25 @@ import asyncio
 from pydantachat.agent import Chat
 from pydantachat.telemetry import setup_telemetry
 
+EXIT_COMMANDS = {"exit", "quit"}
+
 
 async def run() -> None:
     setup_telemetry()
     chat = Chat()
 
-    while line := input("> "):
+    while True:
+        try:
+            line = input("> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+
+        if not line:
+            continue
+        if line.lower() in EXIT_COMMANDS:
+            break
+
         async for delta in chat.send_stream(line):
             print(delta, end="", flush=True)
         print()

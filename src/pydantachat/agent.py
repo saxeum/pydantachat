@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator
 from dotenv import load_dotenv
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelMessage
+from pydantic_ai.models import Model
 
 load_dotenv()
 
@@ -12,9 +13,9 @@ def get_even(num: int) -> bool:
     return num % 2 == 0
 
 
-def build_agent() -> Agent:
+def build_agent(model: Model | None = None) -> Agent:
     agent = Agent(
-        "deepseek:deepseek-flash",
+        model if model is not None else "deepseek:deepseek-flash",
         system_prompt="you are a superhuman agi and always respond with a structured output for people",
     )
     agent.tool_plain(get_even)
@@ -35,10 +36,17 @@ class Chat:
         return result.output
 
     async def send_stream(self, prompt: str) -> AsyncIterator[str]:
-        """For the UI: text deltas as they arrive."""
+        """For the UI: text deltas as they arrive.
+
+        Text output only; use `stream_output()` if this agent gains a
+        structured output type.
+        """
         async with self.agent.run_stream(
             prompt, message_history=self.history
         ) as result:
-            async for delta in result.stream_text(delta=True, debounce_by=None):
-                yield delta
-            self.history = result.all_messages()
+            try:
+                async for delta in result.stream_text(delta=True, debounce_by=None):
+                    yield delta
+            finally:
+                # Also runs if the consumer stops early and closes the iterator.
+                self.history = result.all_messages()
