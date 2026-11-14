@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 
 from dotenv import load_dotenv
 from pydantic_ai import Agent
@@ -35,7 +35,7 @@ class Chat:
         self.history = result.all_messages()
         return result.output
 
-    async def send_stream(self, prompt: str) -> AsyncIterator[str]:
+    async def send_stream(self, prompt: str) -> AsyncGenerator[str]:
         """For the UI: text deltas as they arrive.
 
         Text output only; use `stream_output()` if this agent gains a
