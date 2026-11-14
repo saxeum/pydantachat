@@ -10,7 +10,6 @@ from pydantic_ai.settings import ModelSettings, ThinkingLevel
 
 load_dotenv()
 
-DEFAULT_MODEL = "deepseek:deepseek-flash"
 _THINKING_LEVELS = {"minimal", "low", "medium", "high", "xhigh", "max"}
 
 
@@ -41,10 +40,28 @@ def _model_settings_from_env() -> ModelSettings | None:
     return ModelSettings(thinking=thinking) if thinking is not None else None
 
 
+def _model_id_from_env() -> tuple[str, str]:
+    provider = os.getenv("PROVIDER", "").strip()
+    model = os.getenv("MODEL", "").strip()
+    if not provider or not model:
+        raise ValueError("Set PROVIDER and MODEL in .env to build the agent.")
+    return provider, f"{provider}:{model}"
+
+
+def _ensure_provider_api_key(provider: str) -> None:
+    api_key = os.getenv("PROVIDER_API_KEY", "").strip()
+    if not api_key:
+        raise ValueError("Set PROVIDER_API_KEY in .env to build the agent.")
+    env_name = f"{provider.upper().replace('-', '_')}_API_KEY"
+    os.environ[env_name] = api_key
+
+
 def build_agent(model: Model | str | None = None) -> Agent:
-    """Build the app agent; an injected model bypasses MODEL/THINKING_LEVEL."""
+    """Build the app agent; an injected model bypasses provider env vars."""
     if model is None:
-        model = os.getenv("MODEL", DEFAULT_MODEL)
+        provider, model_id = _model_id_from_env()
+        _ensure_provider_api_key(provider)
+        model = model_id
         model_settings = _model_settings_from_env()
     else:
         model_settings = None

@@ -1,3 +1,5 @@
+import os
+
 import pytest
 from pydantic_ai import Agent, models
 from pydantic_ai.messages import (
@@ -10,7 +12,14 @@ from pydantic_ai.messages import (
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
 
-from pydantachat.agent import Chat, build_agent, get_even
+from pydantachat.agent import (
+    Chat,
+    _ensure_provider_api_key,
+    _model_id_from_env,
+    _thinking_from_env,
+    build_agent,
+    get_even,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -29,39 +38,47 @@ def test_get_even_false(num: int) -> None:
     assert get_even(num) is False
 
 
-def test_build_agent_reads_model_and_thinking_env(
+def test_model_id_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PROVIDER", "acme")
+    monkeypatch.setenv("MODEL", "acme-model")
+
+    assert _model_id_from_env() == ("acme", "acme:acme-model")
+
+
+def test_model_id_from_env_requires_both(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PROVIDER", raising=False)
+
+    with pytest.raises(ValueError, match="PROVIDER"):
+        _model_id_from_env()
+
+
+def test_provider_api_key_maps_to_provider_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
-    monkeypatch.setenv("MODEL", "deepseek:deepseek-chat")
+    monkeypatch.setenv("PROVIDER_API_KEY", "test-key")
+    monkeypatch.setenv("ACME_API_KEY", "old")
+
+    _ensure_provider_api_key("acme")
+
+    assert os.environ["ACME_API_KEY"] == "test-key"
+
+
+def test_thinking_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("THINKING_LEVEL", "low")
+    assert _thinking_from_env() == "low"
 
-    agent = build_agent()
+    monkeypatch.setenv("THINKING_LEVEL", "false")
+    assert _thinking_from_env() is False
 
-    assert getattr(agent.model, "model_id", None) == "deepseek:deepseek-chat"
-    settings = agent.model_settings
-    assert isinstance(settings, dict)
-    assert settings.get("thinking") == "low"
-
-
-def test_build_agent_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
-    monkeypatch.delenv("MODEL", raising=False)
-    monkeypatch.delenv("THINKING_LEVEL", raising=False)
-
-    agent = build_agent()
-
-    assert getattr(agent.model, "model_id", None) == "deepseek:deepseek-flash"
-    assert agent.model_settings is None
+    monkeypatch.setenv("THINKING_LEVEL", "")
+    assert _thinking_from_env() is None
 
 
-def test_build_agent_rejects_invalid_thinking(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_thinking_from_env_rejects_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("THINKING_LEVEL", "bogus")
 
     with pytest.raises(ValueError, match="THINKING_LEVEL"):
-        build_agent()
+        _thinking_from_env()
 
 
 async def test_send() -> None:

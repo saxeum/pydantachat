@@ -1,6 +1,6 @@
-"""Minimal pydantic-evals dataset for the DeepSeek agent.
+"""Minimal pydantic-evals dataset for the configured agent.
 
-Run with `uv run python -m pydantachat.evals` (requires `DEEPSEEK_API_KEY`).
+Run with `uv run python -m pydantachat.evals` (requires `PROVIDER_API_KEY`).
 Each case is repeated to smooth model nondeterminism; treat the report as a
 measurement, not a pass/fail gate.
 """
@@ -119,8 +119,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if not os.getenv("DEEPSEEK_API_KEY"):
-        raise SystemExit("Set DEEPSEEK_API_KEY (or put it in .env) to run evals.")
+    if not os.getenv("PROVIDER_API_KEY"):
+        raise SystemExit("Set PROVIDER_API_KEY (or put it in .env) to run evals.")
     if args.baseline is not None and not args.baseline.exists():
         raise SystemExit(f"Baseline report not found: {args.baseline}")
 

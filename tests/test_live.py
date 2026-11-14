@@ -1,4 +1,4 @@
-"""Opt-in smoke tests against the real DeepSeek API.
+"""Opt-in smoke tests against the real provider API.
 
 Run with `uv run pytest -m live`; the default run excludes them. They assert
 only invariants -- completion, non-empty output, tool execution -- never exact
@@ -18,8 +18,8 @@ load_dotenv()
 pytestmark = [
     pytest.mark.live,
     pytest.mark.skipif(
-        not os.getenv("DEEPSEEK_API_KEY"),
-        reason="DEEPSEEK_API_KEY is not set",
+        not os.getenv("PROVIDER_API_KEY"),
+        reason="PROVIDER_API_KEY is not set",
     ),
 ]
 
