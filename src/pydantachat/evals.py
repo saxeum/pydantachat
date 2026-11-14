@@ -8,9 +8,23 @@ measurement, not a pass/fail gate.
 import os
 
 from pydantic_evals import Case, Dataset
-from pydantic_evals.evaluators import Contains
+from pydantic_evals.evaluators import (
+    ArgumentCorrectness,
+    Contains,
+    ToolCorrectness,
+)
 
 from pydantachat.agent import build_agent
+
+
+def _instrument() -> None:
+    """Capture tool spans for the span-based evaluators; no exporter needed."""
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.trace import set_tracer_provider
+    from pydantic_ai import Agent
+
+    set_tracer_provider(TracerProvider())
+    Agent.instrument_all()
 
 
 def task(prompt: str) -> str:
@@ -39,7 +53,13 @@ dataset = Dataset[str, str, None](
                 "yes or no. You must call the tool before answering."
             ),
             expected_output="yes",
-            evaluators=[Contains("yes", case_sensitive=False)],
+            evaluators=[
+                Contains("yes", case_sensitive=False),
+                ToolCorrectness(expected_tools=["get_even"]),
+                ArgumentCorrectness(
+                    tool_name="get_even", expected_arguments={"num": 4}
+                ),
+            ],
         ),
     ],
 )
@@ -48,6 +68,7 @@ dataset = Dataset[str, str, None](
 def main() -> None:
     if not os.getenv("DEEPSEEK_API_KEY"):
         raise SystemExit("Set DEEPSEEK_API_KEY (or put it in .env) to run evals.")
+    _instrument()
     report = dataset.evaluate_sync(task, repeat=3)
     report.print()
     print(report.averages())
