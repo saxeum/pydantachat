@@ -38,7 +38,8 @@ one that must use the `get_even` tool and one that must not use any tool — and
 prints per-case results plus the aggregate pass rate. The tool cases also check
 the tool spans and their arguments, so a correct answer without the right tool
 call fails. Reports are written under `reports/` and are git-ignored. Each run
-ends with the total model cost. This is a measurement, not a CI gate.
+prints the model, effective thinking mode, total model cost, and total thinking
+tokens. This is a measurement, not a CI gate.
 
 ## Tracing
 
