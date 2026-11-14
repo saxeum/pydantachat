@@ -8,6 +8,7 @@ measurement, not a pass/fail gate.
 import argparse
 import os
 from pathlib import Path
+from typing import Any
 
 from pydantic_evals import Case, Dataset
 from pydantic_evals.evaluators import (
@@ -16,7 +17,7 @@ from pydantic_evals.evaluators import (
     MaxToolCalls,
     ToolCorrectness,
 )
-from pydantic_evals.reporting import EvaluationReportAdapter
+from pydantic_evals.reporting import EvaluationReport, EvaluationReportAdapter
 
 from pydantachat.agent import build_agent
 
@@ -33,6 +34,13 @@ def _instrument() -> None:
 
 def task(prompt: str) -> str:
     return build_agent().run_sync(prompt).output
+
+
+def _total_cost(report: EvaluationReport[Any, Any, Any]) -> float | None:
+    costs = [
+        float(case.metrics["cost"]) for case in report.cases if "cost" in case.metrics
+    ]
+    return sum(costs) if costs else None
 
 
 dataset = Dataset[str, str, None](
@@ -101,6 +109,11 @@ def main() -> None:
     report = dataset.evaluate_sync(task, repeat=3)
     report.print(baseline=baseline)
     print(report.averages())
+    total_cost = _total_cost(report)
+    if total_cost is None:
+        print("Total cost: unavailable")
+    else:
+        print(f"Total cost: ${total_cost:.6f}")
 
     if args.save is not None:
         args.save.parent.mkdir(parents=True, exist_ok=True)
