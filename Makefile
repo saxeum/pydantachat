@@ -1,8 +1,19 @@
+.DEFAULT_GOAL := help
+
 REPORTS_DIR ?= reports
 BASELINE ?= $(REPORTS_DIR)/baseline.json
 CURRENT ?= $(REPORTS_DIR)/current.json
 
-.PHONY: evals evals-baseline evals-compare
+.PHONY: help evals evals-baseline evals-compare
+
+help:
+	@echo "Usage: make <target>"
+	@echo
+	@echo "Targets:"
+	@echo "  help            Show this help"
+	@echo "  evals           Run the eval suite"
+	@echo "  evals-baseline  Save a baseline report to $(BASELINE)"
+	@echo "  evals-compare   Run evals and compare against $(BASELINE)"
 
 evals:
 	uv run python -m pydantachat.evals
