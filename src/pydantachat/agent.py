@@ -35,7 +35,7 @@ class Chat:
         self.history = result.all_messages()
         return result.output
 
-    async def send_stream(self, prompt: str) -> AsyncGenerator[str, None]:
+    async def send_stream(self, prompt: str) -> AsyncGenerator[str]:
         """For the UI: text deltas as they arrive.
 
         Text output only; use `stream_output()` if this agent gains a
