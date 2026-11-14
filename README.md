@@ -14,6 +14,17 @@ uv run pydantachat
 
 Python 3.14 or newer.
 
+## Tests
+
+```bash
+uv run pytest          # offline: TestModel/FunctionModel only
+uv run pytest -m live  # opt-in smoke tests against the real DeepSeek API
+```
+
+The live suite is skipped unless `DEEPSEEK_API_KEY` is set (in the environment
+or in `.env`). It asserts only invariants — completion, non-empty output, tool
+execution — never exact wording; wording quality belongs to the eval harness.
+
 ## Tracing
 
 Opt-in, and driven by one variable: set `OTEL_EXPORTER_OTLP_ENDPOINT` and spans
