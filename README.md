@@ -33,7 +33,9 @@ uv run python -m pydantachat.evals
 
 Requires `DEEPSEEK_API_KEY`. Runs the evenness cases three times each — including
 one that must use the `get_even` tool — and prints per-case results plus the
-aggregate pass rate. This is a measurement, not a CI gate.
+aggregate pass rate. The tool case also checks the tool span and its `num=4`
+argument, so it fails if the model answers without calling the tool. This is a
+measurement, not a CI gate.
 
 ## Tracing
 
