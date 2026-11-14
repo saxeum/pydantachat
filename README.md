@@ -14,6 +14,16 @@ uv run pydantachat
 
 Python 3.14 or newer.
 
+## Configuration
+
+Set these in `.env` or the environment:
+
+- `DEEPSEEK_API_KEY` — required.
+- `MODEL` — model id, default `deepseek:deepseek-flash`.
+- `THINKING_LEVEL` — `true`, `false`, or `minimal`/`low`/`medium`/`high`/
+  `xhigh`/`max`; empty uses the provider default (enabled for
+  `deepseek-flash`).
+
 ## Tests
 
 ```bash
