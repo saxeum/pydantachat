@@ -25,6 +25,16 @@ The live suite is skipped unless `DEEPSEEK_API_KEY` is set (in the environment
 or in `.env`). It asserts only invariants — completion, non-empty output, tool
 execution — never exact wording; wording quality belongs to the eval harness.
 
+## Evals
+
+```bash
+uv run python -m pydantachat.evals
+```
+
+Requires `DEEPSEEK_API_KEY`. Runs the evenness cases three times each — including
+one that must use the `get_even` tool — and prints per-case results plus the
+aggregate pass rate. This is a measurement, not a CI gate.
+
 ## Tracing
 
 Opt-in, and driven by one variable: set `OTEL_EXPORTER_OTLP_ENDPOINT` and spans
