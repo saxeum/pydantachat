@@ -1,0 +1,18 @@
+services:
+  phoenix:
+    image: arizephoenix/phoenix:version-21.1.0
+    container_name: phoenix
+    ports:
+      - "6006:6006" # UI + OTLP HTTP
+      - "4317:4317" # OTLP gRPC
+    environment:
+      - PHOENIX_WORKING_DIR=/mnt/phoenix
+      # Phoenix >= v21 enables auth by default; this instance is local-only.
+      # Flip to true and set PHOENIX_SECRET if you expose it beyond localhost.
+      - PHOENIX_ENABLE_AUTH=false
+    volumes:
+      - phoenix-data:/mnt/phoenix
+    restart: unless-stopped
+
+volumes:
+  phoenix-data:
