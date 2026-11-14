@@ -29,12 +29,15 @@ execution — never exact wording; wording quality belongs to the eval harness.
 
 ```bash
 uv run python -m pydantachat.evals
+make evals-baseline   # save reports/baseline.json
+make evals-compare    # run again and diff against the baseline
 ```
 
 Requires `DEEPSEEK_API_KEY`. Runs the evenness cases three times each — including
-one that must use the `get_even` tool — and prints per-case results plus the
-aggregate pass rate. The tool case also checks the tool span and its `num=4`
-argument, so it fails if the model answers without calling the tool. This is a
+one that must use the `get_even` tool and one that must not use any tool — and
+prints per-case results plus the aggregate pass rate. The tool cases also check
+the tool spans and their arguments, so a correct answer without the right tool
+call fails. Reports are written under `reports/` and are git-ignored. This is a
 measurement, not a CI gate.
 
 ## Tracing

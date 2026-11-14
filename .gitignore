@@ -21,3 +21,6 @@ terraform.tfvars
 
 # Editor settings
 .zed/
+
+# Eval reports
+reports/
