@@ -35,10 +35,14 @@ class ModelConfig:
     model: str
     thinking: ThinkingLevel | None = None
 
-    @property
-    def model_id(self) -> str:
+    def validate(self) -> None:
+        """Raise if the provider or model is missing."""
         if not self.provider or not self.model:
             raise ValueError("Set PROVIDER and MODEL in .env to build the agent.")
+
+    @property
+    def model_id(self) -> str:
+        self.validate()
         return f"{self.provider}:{self.model}"
 
     @property
@@ -63,7 +67,7 @@ class Settings:
     model: ModelConfig
 
     @classmethod
-    def from_env(cls) -> "Settings":
+    def from_env(cls) -> Settings:
         return cls(
             model=ModelConfig(
                 provider=os.getenv("PROVIDER", "").strip(),

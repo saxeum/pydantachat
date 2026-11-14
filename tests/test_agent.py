@@ -50,7 +50,7 @@ def test_settings_requires_provider_and_model(
     settings = Settings.from_env()
 
     with pytest.raises(ValueError, match="PROVIDER"):
-        settings.model.model_id
+        settings.model.validate()
 
 
 def test_settings_uses_provider_specific_key_env(

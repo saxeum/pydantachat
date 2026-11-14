@@ -121,7 +121,7 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
-        settings.model.model_id
+        settings.model.validate()
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
     if not settings.model.has_api_key:
