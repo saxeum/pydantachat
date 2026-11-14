@@ -14,5 +14,5 @@ jobs:
         with:
           python-version: "3.14"
       - run: uv sync --locked
-      - run: uv run python -c "import pydantachat.main, pydantachat.telemetry"
+      - run: uv run --locked pytest
       - run: uv build
