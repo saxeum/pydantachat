@@ -1,12 +1,12 @@
 """Minimal pydantic-evals dataset for the configured agent.
 
-Run with `uv run python -m pydantachat.evals` (requires `PROVIDER_API_KEY`).
+Run with `uv run python -m pydantachat.evals` (requires the active provider's
+API key, e.g. `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY`).
 Each case is repeated to smooth model nondeterminism; treat the report as a
 measurement, not a pass/fail gate.
 """
 
 import argparse
-import os
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +21,7 @@ from pydantic_evals.evaluators import (
 from pydantic_evals.reporting import EvaluationReport, EvaluationReportAdapter
 
 from pydantachat.agent import build_agent
+from pydantachat.settings import settings
 
 
 def _instrument() -> None:
@@ -119,8 +120,14 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if not os.getenv("PROVIDER_API_KEY"):
-        raise SystemExit("Set PROVIDER_API_KEY (or put it in .env) to run evals.")
+    try:
+        settings.model.model_id
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    if not settings.model.has_api_key:
+        raise SystemExit(
+            f"Set {settings.model.api_key_env} (or put it in .env) to run evals."
+        )
     if args.baseline is not None and not args.baseline.exists():
         raise SystemExit(f"Baseline report not found: {args.baseline}")
 

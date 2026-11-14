@@ -5,21 +5,17 @@ only invariants -- completion, non-empty output, tool execution -- never exact
 wording, which belongs to the eval harness.
 """
 
-import os
-
 import pytest
-from dotenv import load_dotenv
 from pydantic_ai.messages import ModelMessage, ToolReturnPart
 
 from pydantachat.agent import Chat
-
-load_dotenv()
+from pydantachat.settings import settings
 
 pytestmark = [
     pytest.mark.live,
     pytest.mark.skipif(
-        not os.getenv("PROVIDER_API_KEY"),
-        reason="PROVIDER_API_KEY is not set",
+        not settings.model.has_api_key,
+        reason="active provider API key is not set",
     ),
 ]
 

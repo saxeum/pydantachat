@@ -1,5 +1,3 @@
-import os
-
 import pytest
 from pydantic_ai import Agent, models
 from pydantic_ai.messages import (
@@ -12,14 +10,8 @@ from pydantic_ai.messages import (
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
 
-from pydantachat.agent import (
-    Chat,
-    _ensure_provider_api_key,
-    _model_id_from_env,
-    _thinking_from_env,
-    build_agent,
-    get_even,
-)
+from pydantachat.agent import Chat, build_agent, get_even
+from pydantachat.settings import Settings, thinking_from_env
 
 
 @pytest.fixture(autouse=True)
@@ -38,47 +30,58 @@ def test_get_even_false(num: int) -> None:
     assert get_even(num) is False
 
 
-def test_model_id_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_settings_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PROVIDER", "acme")
     monkeypatch.setenv("MODEL", "acme-model")
+    monkeypatch.setenv("THINKING_LEVEL", "low")
 
-    assert _model_id_from_env() == ("acme", "acme:acme-model")
+    settings = Settings.from_env()
 
-
-def test_model_id_from_env_requires_both(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("PROVIDER", raising=False)
-
-    with pytest.raises(ValueError, match="PROVIDER"):
-        _model_id_from_env()
+    assert settings.model.model_id == "acme:acme-model"
+    assert settings.model.model_settings == {"thinking": "low"}
 
 
-def test_provider_api_key_maps_to_provider_env(
+def test_settings_requires_provider_and_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("PROVIDER_API_KEY", "test-key")
-    monkeypatch.setenv("ACME_API_KEY", "old")
+    monkeypatch.delenv("PROVIDER", raising=False)
+    monkeypatch.delenv("MODEL", raising=False)
 
-    _ensure_provider_api_key("acme")
+    settings = Settings.from_env()
 
-    assert os.environ["ACME_API_KEY"] == "test-key"
+    with pytest.raises(ValueError, match="PROVIDER"):
+        settings.model.model_id
+
+
+def test_settings_uses_provider_specific_key_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PROVIDER", "acme")
+    monkeypatch.setenv("MODEL", "acme-model")
+    monkeypatch.setenv("ACME_API_KEY", "test-key")
+
+    settings = Settings.from_env()
+
+    assert settings.model.api_key_env == "ACME_API_KEY"
+    assert settings.model.has_api_key
 
 
 def test_thinking_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("THINKING_LEVEL", "low")
-    assert _thinking_from_env() == "low"
+    assert thinking_from_env() == "low"
 
     monkeypatch.setenv("THINKING_LEVEL", "false")
-    assert _thinking_from_env() is False
+    assert thinking_from_env() is False
 
     monkeypatch.setenv("THINKING_LEVEL", "")
-    assert _thinking_from_env() is None
+    assert thinking_from_env() is None
 
 
 def test_thinking_from_env_rejects_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("THINKING_LEVEL", "bogus")
 
     with pytest.raises(ValueError, match="THINKING_LEVEL"):
-        _thinking_from_env()
+        thinking_from_env()
 
 
 async def test_send() -> None:
