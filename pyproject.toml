@@ -17,7 +17,16 @@ dependencies = [
 pydantachat = "pydantachat.main:main"
 
 [dependency-groups]
-dev = ["pytest>=8.4.0"]
+dev = [
+    "pytest>=8.4.0",
+    "pytest-asyncio>=1.5.0",
+]
+
+[tool.pytest.ini_options]
+markers = ["live: hits the real DeepSeek API (requires DEEPSEEK_API_KEY)"]
+addopts = "-m 'not live'"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 [build-system]
 requires = ["uv_build>=0.13.0,<0.14.0"]
