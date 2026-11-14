@@ -1,6 +1,6 @@
-"""Minimal pydantic-evals dataset for the DeepSeek agent.
+"""Minimal pydantic-evals dataset for the configured agent.
 
-Run with `uv run python -m pydantachat.evals` (requires `DEEPSEEK_API_KEY`).
+Run with `uv run python -m pydantachat.evals` (requires `PROVIDER_API_KEY`).
 Each case is repeated to smooth model nondeterminism; treat the report as a
 measurement, not a pass/fail gate.
 """
@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from pydantic_ai import Agent
 from pydantic_evals import Case, Dataset
 from pydantic_evals.evaluators import (
     ArgumentCorrectness,
@@ -26,7 +27,6 @@ def _instrument() -> None:
     """Capture tool spans for the span-based evaluators; no exporter needed."""
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.trace import set_tracer_provider
-    from pydantic_ai import Agent
 
     set_tracer_provider(TracerProvider())
     Agent.instrument_all()
@@ -36,11 +36,36 @@ def task(prompt: str) -> str:
     return build_agent().run_sync(prompt).output
 
 
-def _total_cost(report: EvaluationReport[Any, Any, Any]) -> float | None:
-    costs = [
-        float(case.metrics["cost"]) for case in report.cases if "cost" in case.metrics
+def _total_metric(report: EvaluationReport[Any, Any, Any], name: str) -> float | None:
+    values = [
+        float(case.metrics[name]) for case in report.cases if name in case.metrics
     ]
-    return sum(costs) if costs else None
+    return sum(values) if values else None
+
+
+def _total_cost(report: EvaluationReport[Any, Any, Any]) -> float | None:
+    return _total_metric(report, "cost")
+
+
+def _model_label(agent: Agent) -> str:
+    return getattr(agent.model, "model_id", None) or str(agent.model)
+
+
+def _thinking_label(agent: Agent) -> str:
+    settings = agent.model_settings
+    thinking = settings.get("thinking") if isinstance(settings, dict) else None
+    if thinking is not None:
+        if isinstance(thinking, bool):
+            return "enabled" if thinking else "disabled"
+        return str(thinking)
+
+    profile = getattr(agent.model, "profile", None)
+    if isinstance(profile, dict):
+        if profile.get("thinking_always_enabled"):
+            return "always enabled"
+        if profile.get("thinking_enabled_by_default"):
+            return "provider default (enabled; effort unset)"
+    return "provider default"
 
 
 dataset = Dataset[str, str, None](
@@ -94,10 +119,16 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if not os.getenv("DEEPSEEK_API_KEY"):
-        raise SystemExit("Set DEEPSEEK_API_KEY (or put it in .env) to run evals.")
+    if not os.getenv("PROVIDER_API_KEY"):
+        raise SystemExit("Set PROVIDER_API_KEY (or put it in .env) to run evals.")
     if args.baseline is not None and not args.baseline.exists():
         raise SystemExit(f"Baseline report not found: {args.baseline}")
+
+    agent = build_agent()
+    model = _model_label(agent)
+    thinking = _thinking_label(agent)
+    print(f"Model: {model}")
+    print(f"Thinking: {thinking}")
 
     baseline = (
         EvaluationReportAdapter.validate_json(args.baseline.read_text())
@@ -106,7 +137,11 @@ def main() -> None:
     )
 
     _instrument()
-    report = dataset.evaluate_sync(task, repeat=3)
+    report = dataset.evaluate_sync(
+        task,
+        repeat=3,
+        metadata={"model": model, "thinking": thinking},
+    )
     report.print(baseline=baseline)
     print(report.averages())
     total_cost = _total_cost(report)
@@ -114,6 +149,11 @@ def main() -> None:
         print("Total cost: unavailable")
     else:
         print(f"Total cost: ${total_cost:.6f}")
+    thinking_tokens = _total_metric(report, "reasoning_tokens")
+    if thinking_tokens is None:
+        print("Total thinking tokens: unavailable")
+    else:
+        print(f"Total thinking tokens: {int(thinking_tokens)}")
 
     if args.save is not None:
         args.save.parent.mkdir(parents=True, exist_ok=True)

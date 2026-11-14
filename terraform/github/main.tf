@@ -23,7 +23,7 @@ variable "owner" {
 
 resource "github_repository" "repo" {
   name         = "pydantachat"
-  description  = "A minimal Pydantic AI agent for DeepSeek, with vendor-neutral OpenTelemetry tracing."
+  description  = "A minimal configurable Pydantic AI agent with vendor-neutral OpenTelemetry tracing."
   visibility   = "public"
   has_issues   = true
   has_wiki     = false
@@ -34,7 +34,7 @@ resource "github_repository" "repo" {
   # repository, and an initial README commit would have to be reconciled with
   # it before the first push.
 
-  topics = ["pydantic-ai", "deepseek", "opentelemetry", "tracing", "python"]
+  topics = ["pydantic-ai", "opentelemetry", "tracing", "python"]
 
   # Both free on a public repository, and both turn "no secret has ever been
   # near this" from an intention into an enforced property.

@@ -1,7 +1,7 @@
 [project]
 name = "pydantachat"
 version = "0.1.0"
-description = "A minimal Pydantic AI agent for DeepSeek, with vendor-neutral OpenTelemetry tracing."
+description = "A minimal configurable Pydantic AI agent with vendor-neutral OpenTelemetry tracing."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -23,7 +23,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-markers = ["live: hits the real DeepSeek API (requires DEEPSEEK_API_KEY)"]
+markers = ["live: hits the real provider API (requires PROVIDER_API_KEY)"]
 addopts = "-m 'not live'"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

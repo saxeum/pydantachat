@@ -1,11 +1,16 @@
+import os
 from collections.abc import AsyncGenerator
+from typing import cast
 
 from dotenv import load_dotenv
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models import Model
+from pydantic_ai.settings import ModelSettings, ThinkingLevel
 
 load_dotenv()
+
+_THINKING_LEVELS = {"minimal", "low", "medium", "high", "xhigh", "max"}
 
 
 def get_even(num: int) -> bool:
@@ -13,10 +18,58 @@ def get_even(num: int) -> bool:
     return num % 2 == 0
 
 
-def build_agent(model: Model | None = None) -> Agent:
+def _thinking_from_env() -> ThinkingLevel | None:
+    raw = os.getenv("THINKING_LEVEL", "").strip()
+    if not raw:
+        return None
+    value = raw.lower()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    if value in _THINKING_LEVELS:
+        return cast(ThinkingLevel, value)
+    raise ValueError(
+        "THINKING_LEVEL must be true, false, or one of "
+        f"{', '.join(sorted(_THINKING_LEVELS))}; got {raw!r}"
+    )
+
+
+def _model_settings_from_env() -> ModelSettings | None:
+    thinking = _thinking_from_env()
+    return ModelSettings(thinking=thinking) if thinking is not None else None
+
+
+def _model_id_from_env() -> tuple[str, str]:
+    provider = os.getenv("PROVIDER", "").strip()
+    model = os.getenv("MODEL", "").strip()
+    if not provider or not model:
+        raise ValueError("Set PROVIDER and MODEL in .env to build the agent.")
+    return provider, f"{provider}:{model}"
+
+
+def _ensure_provider_api_key(provider: str) -> None:
+    api_key = os.getenv("PROVIDER_API_KEY", "").strip()
+    if not api_key:
+        raise ValueError("Set PROVIDER_API_KEY in .env to build the agent.")
+    env_name = f"{provider.upper().replace('-', '_')}_API_KEY"
+    os.environ[env_name] = api_key
+
+
+def build_agent(model: Model | str | None = None) -> Agent:
+    """Build the app agent; an injected model bypasses provider env vars."""
+    if model is None:
+        provider, model_id = _model_id_from_env()
+        _ensure_provider_api_key(provider)
+        model = model_id
+        model_settings = _model_settings_from_env()
+    else:
+        model_settings = None
+
     agent = Agent(
-        model if model is not None else "deepseek:deepseek-flash",
+        model,
         system_prompt="you are a superhuman agi and always respond with a structured output for people",
+        model_settings=model_settings,
     )
     agent.tool_plain(get_even)
     return agent

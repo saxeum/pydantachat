@@ -1,3 +1,5 @@
+import os
+
 import pytest
 from pydantic_ai import Agent, models
 from pydantic_ai.messages import (
@@ -10,7 +12,14 @@ from pydantic_ai.messages import (
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
 
-from pydantachat.agent import Chat, build_agent, get_even
+from pydantachat.agent import (
+    Chat,
+    _ensure_provider_api_key,
+    _model_id_from_env,
+    _thinking_from_env,
+    build_agent,
+    get_even,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -27,6 +36,49 @@ def test_get_even_true(num: int) -> None:
 @pytest.mark.parametrize("num", [1, 3, 41, -3])
 def test_get_even_false(num: int) -> None:
     assert get_even(num) is False
+
+
+def test_model_id_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PROVIDER", "acme")
+    monkeypatch.setenv("MODEL", "acme-model")
+
+    assert _model_id_from_env() == ("acme", "acme:acme-model")
+
+
+def test_model_id_from_env_requires_both(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PROVIDER", raising=False)
+
+    with pytest.raises(ValueError, match="PROVIDER"):
+        _model_id_from_env()
+
+
+def test_provider_api_key_maps_to_provider_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PROVIDER_API_KEY", "test-key")
+    monkeypatch.setenv("ACME_API_KEY", "old")
+
+    _ensure_provider_api_key("acme")
+
+    assert os.environ["ACME_API_KEY"] == "test-key"
+
+
+def test_thinking_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("THINKING_LEVEL", "low")
+    assert _thinking_from_env() == "low"
+
+    monkeypatch.setenv("THINKING_LEVEL", "false")
+    assert _thinking_from_env() is False
+
+    monkeypatch.setenv("THINKING_LEVEL", "")
+    assert _thinking_from_env() is None
+
+
+def test_thinking_from_env_rejects_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("THINKING_LEVEL", "bogus")
+
+    with pytest.raises(ValueError, match="THINKING_LEVEL"):
+        _thinking_from_env()
 
 
 async def test_send() -> None:
