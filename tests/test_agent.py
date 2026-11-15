@@ -7,6 +7,7 @@ from pydantic_ai import models
 from pydantic_ai.exceptions import AgentRunError
 from pydantic_ai.messages import (
     ModelMessage,
+    ModelRequest,
     ModelResponse,
     TextPart,
     ToolCallPart,
@@ -15,7 +16,12 @@ from pydantic_ai.messages import (
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
 
-from pydantachat.agent import Chat, build_agent, get_orders_tool
+from pydantachat.agent import (
+    Chat,
+    _ended_without_an_answer,
+    build_agent,
+    get_orders_tool,
+)
 
 ORDERS: list[dict[str, str]] = [
     {
@@ -125,6 +131,76 @@ def _tool_returns(messages: list[ModelMessage]) -> list[ToolReturnPart]:
         for part in getattr(message, "parts", [])
         if isinstance(part, ToolReturnPart) and part.tool_name == "get_orders"
     ]
+
+
+def test_a_turn_that_ended_on_a_tool_return_is_unfinished() -> None:
+    """A streamed run can stop after the tool return, before the final answer."""
+    request = ModelRequest(parts=[ToolReturnPart("get_orders", [])])
+    response = ModelResponse(parts=[TextPart("You have one order.")])
+
+    assert _ended_without_an_answer([request])
+    assert not _ended_without_an_answer([request, response])
+
+
+async def test_a_promise_without_the_tool_is_retried() -> None:
+    """DeepSeek sometimes ends a turn with "I'll look that up" and no call."""
+    calls: list[int] = []
+
+    def model(messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
+        calls.append(len(messages))
+        if _tool_returns(messages):
+            return ModelResponse(parts=[TextPart("You have one order.")])
+        if len(calls) == 1:
+            return ModelResponse(parts=[TextPart("I'll look that up for you.")])
+        return ModelResponse(parts=[ToolCallPart("get_orders", {})])
+
+    chat = Chat(
+        agent=build_agent(FunctionModel(model), list_orders=_orders),
+        requires_orders=True,
+    )
+
+    answer = await chat.send("what are my orders?")
+
+    assert answer == "You have one order."
+    assert _tool_returns(chat.history)
+
+
+async def test_a_greeting_is_not_retried() -> None:
+    calls: list[int] = []
+
+    def model(_messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
+        calls.append(1)
+        return ModelResponse(parts=[TextPart("Hello! How can I help?")])
+
+    chat = Chat(
+        agent=build_agent(FunctionModel(model), list_orders=_orders),
+        requires_orders=True,
+    )
+
+    assert await chat.send("hello") == "Hello! How can I help?"
+    assert len(calls) == 1
+
+
+async def test_a_promise_without_the_tool_is_retried_while_streaming() -> None:
+    async def stream(_messages: list[ModelMessage], _info: AgentInfo):
+        yield "I'll look that up for you."
+
+    def reply(messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
+        if _tool_returns(messages):
+            return ModelResponse(parts=[TextPart("You have one order.")])
+        return ModelResponse(parts=[ToolCallPart("get_orders", {})])
+
+    chat = Chat(
+        agent=build_agent(
+            FunctionModel(reply, stream_function=stream), list_orders=_orders
+        ),
+        requires_orders=True,
+    )
+
+    chunks = [chunk async for chunk in chat.send_stream("what are my orders?")]
+
+    assert "".join(chunks) == "I'll look that up for you.\n\nYou have one order."
+    assert _tool_returns(chat.history)
 
 
 async def test_send_reuses_history() -> None:

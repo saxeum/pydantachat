@@ -11,6 +11,7 @@ data and never needs the web server or an orders token.
 """
 
 import argparse
+import asyncio
 import tempfile
 from dataclasses import dataclass
 from functools import partial
@@ -29,7 +30,7 @@ from pydantic_evals.evaluators import (
 )
 from pydantic_evals.reporting import EvaluationReport, EvaluationReportAdapter
 
-from pydantachat.agent import ListOrders, build_agent
+from pydantachat.agent import Chat, ListOrders, build_agent
 from pydantachat.db import Database, Order
 from pydantachat.settings import (
     ConfigError,
@@ -63,10 +64,14 @@ def _instrument() -> None:
     Agent.instrument_all()
 
 
-def task(prompt: str, config: ModelConfig, list_orders: ListOrders) -> str:
-    # One agent per task: pydantic-evals runs each case in its own event loop,
-    # and an agent built in another loop carries a loop-bound Event (#29).
-    return build_agent(config=config, list_orders=list_orders).run_sync(prompt).output
+async def task(prompt: str, config: ModelConfig, list_orders: ListOrders) -> str:
+    # Through `Chat`, so the run measures the same wrapper the app uses,
+    # including the one corrective retry for an unfinished turn.
+    chat = Chat(
+        agent=build_agent(config=config, list_orders=list_orders),
+        requires_orders=True,
+    )
+    return await chat.send(prompt)
 
 
 @dataclass
@@ -201,10 +206,12 @@ def main() -> None:
         dataset = build_dataset(orders)
 
         _instrument()
-        report = dataset.evaluate_sync(
-            partial(task, config=config, list_orders=list_orders),
-            repeat=3,
-            metadata={"model": model, "thinking": thinking},
+        report = asyncio.run(
+            dataset.evaluate(
+                partial(task, config=config, list_orders=list_orders),
+                repeat=3,
+                metadata={"model": model, "thinking": thinking},
+            )
         )
 
     report.print(baseline=baseline)

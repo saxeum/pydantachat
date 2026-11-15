@@ -43,7 +43,7 @@ def make_chat(settings: Settings) -> Chat:
     async def list_orders() -> list[dict[str, str]]:
         return [order.as_dict() for order in db.orders_for(customer.id)]
 
-    return Chat(agent=build_agent(list_orders=list_orders))
+    return Chat(agent=build_agent(list_orders=list_orders), requires_orders=True)
 
 
 async def _turn(chat: Chat, line: str, key_env: str) -> None:

@@ -68,7 +68,7 @@ def _make_chat(
         customer_id=customer.id,
         session_id=session_id,
     )
-    return Chat(agent=build_agent(list_orders=client.list_orders))
+    return Chat(agent=build_agent(list_orders=client.list_orders), requires_orders=True)
 
 
 def _require_single_worker() -> None:

@@ -64,7 +64,10 @@ function consume(buffer, article) {
       sessionId = JSON.parse(payload).session_id;
     } else if (event === "error") {
       line("system", "the provider failed; try again");
-    } else if (payload !== "[DONE]") {
+    } else if (payload === "[DONE]") {
+      // Visible to the smoke test, and a truthful signal for the page itself.
+      article.dataset.done = "1";
+    } else {
       appendText(article, JSON.parse(payload).text ?? "");
     }
   }

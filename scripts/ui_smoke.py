@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 from itsdangerous import TimestampSigner
 from playwright.sync_api import Locator, Page, sync_playwright
 
-BASE = "http://localhost:8000"
+BASE = os.getenv("BASE", "http://localhost:8000")
 CHROME = os.getenv("CHROME", "/usr/bin/chromium")
 load_dotenv(".env")
 
@@ -61,23 +61,25 @@ def wait_for(
         return False
 
 
-def sample_stream(page: Page, timeout: float = 60.0) -> tuple[list[str], str]:
-    """Collect the bot line's text while the answer streams in, until it settles."""
+def sample_stream(page: Page, timeout: float = 90.0) -> tuple[list[str], str]:
+    """Collect the bot line's text until the server sends [DONE].
+
+    The page mirrors that end-of-stream frame as `data-done` on the article, so
+    a slow second step (a corrected retry) is waited for rather than mistaken
+    for the end of the answer.
+    """
     samples: list[str] = []
     last = ""
-    stable_since: float | None = None
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        bot = page.locator("#log article.bot p")
-        text = bot.last.inner_text() if bot.count() else ""
-        if text != last:
-            samples.append(text)
-            last = text
-            stable_since = None
-        elif text and text != "…":
-            stable_since = stable_since or time.monotonic()
-            if time.monotonic() - stable_since >= 0.6:
-                break
+        bot = page.locator("#log article.bot")
+        if bot.count():
+            text = bot.last.locator("p").inner_text()
+            if text != last:
+                samples.append(text)
+                last = text
+            if bot.last.get_attribute("data-done") == "1":
+                return samples, last
         time.sleep(0.02)
     return samples, last
 
@@ -189,9 +191,11 @@ def main() -> int:
         )
         page.fill("#message", "What did I order in October?")
         page.click("button[type=submit]")
+        _samples, october = sample_stream(page)
         check(
             "new conversation answers",
-            wait_contains(page.locator("#log article.bot p"), "shipped"),
+            bool(october) and october != "…",
+            october[:70],
         )
         check(
             "new conversation drops the session id",

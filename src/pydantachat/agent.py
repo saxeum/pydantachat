@@ -9,7 +9,7 @@ import asyncio
 from collections.abc import AsyncGenerator, Awaitable, Callable
 
 from pydantic_ai import Agent
-from pydantic_ai.messages import ModelMessage
+from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
 from pydantic_ai.models import Model
 
 from pydantachat.settings import ModelConfig, get_settings
@@ -63,6 +63,33 @@ def build_agent(
     return agent
 
 
+CORRECTION = (
+    "You answered without calling the get_orders tool, so you had no data. "
+    "Call it now, then answer the question using only what it returns."
+)
+
+CONTINUE = "Now answer the question using only the data the tool returned."
+
+
+def _called_get_orders(messages: list[ModelMessage]) -> bool:
+    return any(
+        isinstance(part, ToolCallPart) and part.tool_name == "get_orders"
+        for message in messages
+        for part in getattr(message, "parts", [])
+    )
+
+
+def _ended_without_an_answer(messages: list[ModelMessage]) -> bool:
+    """A finished run ends on the model's final response.
+
+    A streamed run can occasionally stop right after a tool return (observed on
+    DeepSeek: preamble text, a tool call, the tool result, then no second
+    response). The history then ends on a `ModelRequest`, and the streamed
+    preamble is all the user would see.
+    """
+    return not messages or not isinstance(messages[-1], ModelResponse)
+
+
 class Chat:
     """One conversation = one history. Create one per UI session / eval case.
 
@@ -71,19 +98,47 @@ class Chat:
     instead of overwriting each other's transcript. That also means a consumer
     must exhaust or close a stream — an abandoned `send_stream` holds the lock
     until it is garbage collected.
+
+    `requires_orders` turns on one corrective retry: a model can end a turn by
+    promising to look the orders up and never calling the tool (observed on
+    DeepSeek). This is a robustness measure for a known model failure, not the
+    authorization boundary — the token is.
     """
 
-    def __init__(self, agent: Agent[None, str] | None = None):
+    def __init__(
+        self, agent: Agent[None, str] | None = None, *, requires_orders: bool = False
+    ):
         self.agent = agent if agent is not None else build_agent()
+        self.requires_orders = requires_orders
         self.history: list[ModelMessage] = []
         self._lock = asyncio.Lock()
+
+    def _needs_retry(self, prompt: str, messages: list[ModelMessage]) -> bool:
+        if not self.requires_orders:
+            return False
+        if _ended_without_an_answer(messages):
+            return True
+        if _called_get_orders(messages):
+            return False
+        return "order" in prompt.lower()
+
+    @staticmethod
+    def _retry_prompt(messages: list[ModelMessage]) -> str:
+        return CONTINUE if _called_get_orders(messages) else CORRECTION
 
     async def send(self, prompt: str) -> str:
         """One complete answer, for evals and other agents."""
         async with self._lock:
             result = await self.agent.run(prompt, message_history=self.history)
             self.history = result.all_messages()
-            return result.output
+            if not self._needs_retry(prompt, self.history):
+                return result.output
+
+            retry = await self.agent.run(
+                self._retry_prompt(self.history), message_history=self.history
+            )
+            self.history = retry.all_messages()
+            return retry.output
 
     async def send_stream(self, prompt: str) -> AsyncGenerator[str]:
         """For a UI: text deltas as they arrive."""
@@ -97,3 +152,15 @@ class Chat:
             finally:
                 # Also runs if the consumer stops early and closes it.
                 self.history = result.all_messages()
+
+            # Stopping early propagates out of the finally above, so an abandoned
+            # stream never reaches the retry.
+            if not self._needs_retry(prompt, self.history):
+                return
+
+            retry = await self.agent.run(
+                self._retry_prompt(self.history), message_history=self.history
+            )
+            self.history = retry.all_messages()
+            yield "\n\n"
+            yield retry.output
