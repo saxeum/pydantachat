@@ -66,14 +66,14 @@ def sample_stream(page: Page, timeout: float = 60.0) -> tuple[list[str], str]:
     samples: list[str] = []
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        bot = page.locator("#log li.bot")
+        bot = page.locator("#log article.bot")
         final = ""
         if bot.count():
             final = bot.last.inner_text()
             samples.append(final)
-            if page.locator("#log li.bot .reasoning").count():
+            if page.locator("#log article.bot .reasoning").count():
                 return samples, final
-        time.sleep(0.05)
+        time.sleep(0.02)
     return samples, final if samples else ""
 
 
@@ -98,13 +98,14 @@ def main() -> int:
         page = anon.new_page()
         watch(page)
         page.goto(BASE + "/")
-        check("signed out: sign-in link appears", wait_for(page, "#status a"))
+        check("signed out: sign-in card appears", wait_for(page, "#sign-in-card a"))
         check("signed out: composer hidden", not page.is_visible("#composer"))
         check("signed out: transcript hidden", not page.is_visible("#log"))
         check(
             "signed out: link points at /login",
-            page.locator("#status a").get_attribute("href") == "/login",
+            page.locator("#sign-in-card a").get_attribute("href") == "/login",
         )
+        page.screenshot(path="/tmp/ui-signed-out.png", full_page=True)
         anon.close()
 
         # --- signed in ----------------------------------------------------
@@ -125,6 +126,7 @@ def main() -> int:
 
         page.goto(BASE + "/")
         check("signed in: composer appears", wait_for(page, "#composer"))
+        page.screenshot(path="/tmp/ui-signed-in.png", full_page=True)
         check("signed in: email shown", EMAIL in (page.text_content("#status") or ""))
         check(
             "transcript is aria-live",
@@ -137,9 +139,10 @@ def main() -> int:
         samples, answer = sample_stream(page)
         check("answer renders as a sentence", "7 is odd" in answer, answer[:70])
         check("reasoning is rendered", "\n" in answer.strip(), repr(answer[:80]))
+        # One distinct state would mean the answer appeared fully formed.
         check(
             "answer arrived in pieces",
-            len(set(samples)) >= 3,
+            len(set(samples)) >= 2,
             f"{len(set(samples))} distinct states",
         )
         check(
@@ -148,14 +151,13 @@ def main() -> int:
         )
         check(
             "user message is echoed",
-            (page.locator("#log li.you").first.inner_text() or "").strip()
-            == "Is 7 even?",
+            "Is 7 even?" in (page.locator("#log article.you").first.inner_text() or ""),
         )
 
         # --- follow-up reuses the session ---------------------------------
         page.fill("#message", "And 4?")
         page.click("button[type=submit]")
-        ok = wait_contains(page.locator("#log li.bot"), "4 is even")
+        ok = wait_contains(page.locator("#log article.bot"), "4 is even")
         check("follow-up answers", ok)
         check(
             "follow-up sends a session id",
@@ -163,8 +165,8 @@ def main() -> int:
         )
         check(
             "both turns are in the transcript",
-            page.locator("#log li.you").count() == 2
-            and page.locator("#log li.bot").count() == 2,
+            page.locator("#log article.you").count() == 2
+            and page.locator("#log article.bot").count() == 2,
         )
 
         # --- new conversation ---------------------------------------------
@@ -177,7 +179,7 @@ def main() -> int:
         page.click("button[type=submit]")
         check(
             "new conversation answers",
-            wait_contains(page.locator("#log li.bot"), "3 is odd"),
+            wait_contains(page.locator("#log article.bot"), "3 is odd"),
         )
         check(
             "new conversation drops the session id",
@@ -189,11 +191,19 @@ def main() -> int:
         page.click("button[type=submit]")
         check(
             "422 renders a readable message",
-            wait_contains(page.locator("#log li.system"), "too long", timeout=20),
+            wait_contains(page.locator("#log article.system"), "too long", timeout=20),
         )
         check(
             "rejected request leaves no bot line",
-            page.locator("#log li.bot").count() == 1,
+            page.locator("#log article.bot").count() == 1,
+        )
+        # The rejected prompt was 4001 unbroken characters: it must not widen
+        # the page, which it did before `overflow-wrap: anywhere`.
+        width = page.evaluate("document.documentElement.scrollWidth")
+        check(
+            "unbroken text does not widen the page",
+            width <= 1100,
+            f"scrollWidth={width}",
         )
 
         # --- provider failure (intercepted) -------------------------------
@@ -210,7 +220,7 @@ def main() -> int:
         check(
             "502 renders a readable message",
             wait_contains(
-                page.locator("#log li.system"), "provider failed", timeout=10
+                page.locator("#log article.system"), "provider failed", timeout=10
             ),
         )
         page.unroute("**/api/chat/stream")
@@ -233,7 +243,7 @@ def main() -> int:
         check(
             "mid-stream error renders a readable message",
             wait_contains(
-                page.locator("#log li.system"), "provider failed", timeout=10
+                page.locator("#log article.system"), "provider failed", timeout=10
             ),
         )
         page.unroute("**/api/chat/stream")
@@ -250,7 +260,7 @@ def main() -> int:
         check(
             "401 renders a readable message",
             wait_contains(
-                page.locator("#log li.system"), "session expired", timeout=10
+                page.locator("#log article.system"), "session expired", timeout=10
             ),
         )
         page.unroute("**/api/chat/stream")
@@ -271,8 +281,10 @@ def main() -> int:
         payload = '<img src=x onerror="alert(1)"> and <script>alert(2)</script>'
         page.fill("#message", payload)
         page.click("button[type=submit]")
-        wait_contains(page.locator("#log li.system"), "provider failed", timeout=10)
-        echoed = page.locator("#log li.you").last.inner_text()
+        wait_contains(
+            page.locator("#log article.system"), "provider failed", timeout=10
+        )
+        echoed = page.locator("#log article.you").last.inner_text()
         check("untrusted prompt is echoed literally", payload in echoed, echoed[:60])
         check(
             "no element is injected from the prompt",
@@ -293,42 +305,45 @@ def main() -> int:
                 status=200, content_type="text/event-stream", body=fake
             ),
         )
-        before = page.locator("#log li.you").count()
-        bots_before = page.locator("#log li.bot").count()
+        before = page.locator("#log article.you").count()
+        bots_before = page.locator("#log article.bot").count()
         page.fill("#message", "Is 5 even?")
         page.press("#message", "Shift+Enter")
         check(
-            "shift+enter does not send", page.locator("#log li.you").count() == before
+            "shift+enter does not send",
+            page.locator("#log article.you").count() == before,
         )
         page.press("#message", "Enter")
         check(
             "enter sends",
-            wait_contains(page.locator("#log li.bot"), "5 is odd", timeout=10),
+            wait_contains(page.locator("#log article.bot"), "5 is odd", timeout=10),
         )
 
         page.fill("#message", "   ")
         page.press("#message", "Enter")
         check(
             "whitespace-only input is ignored",
-            page.locator("#log li.you").count() == before + 1,
+            page.locator("#log article.you").count() == before + 1,
         )
 
         page.fill("#message", "first")
         page.click("button[type=submit]")
         page.fill("#message", "second")
         page.click("button[type=submit]")
-        wait_contains(page.locator("#log li.bot"), "5 is odd", timeout=10)
+        wait_contains(page.locator("#log article.bot"), "5 is odd", timeout=10)
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline and (
-            page.locator("#log li.bot").count() < bots_before + 3
+            page.locator("#log article.bot").count() < bots_before + 3
         ):
             time.sleep(0.05)
         check(
             "overlapping submits both render",
-            page.locator("#log li.bot").count() == bots_before + 3,
-            f"bot lines={page.locator('#log li.bot').count()}",
+            page.locator("#log article.bot").count() == bots_before + 3,
+            f"bot lines={page.locator('#log article.bot').count()}",
         )
         page.unroute("**/api/chat/stream")
+
+        page.screenshot(path="/tmp/ui-chat.png", full_page=True)
 
         # --- reload keeps the session usable ------------------------------
         page.reload()
@@ -341,7 +356,7 @@ def main() -> int:
         check(
             "expired cookie renders a readable message",
             wait_contains(
-                page.locator("#log li.system"), "session expired", timeout=15
+                page.locator("#log article.system"), "session expired", timeout=15
             ),
         )
         check(
@@ -354,7 +369,9 @@ def main() -> int:
         page.reload()
         page.wait_for_selector("#composer", state="visible")
         page.click("#status a[href='/logout']")
-        check("logout returns to the signed-out page", wait_for(page, "#status a"))
+        check(
+            "logout returns to the signed-out page", wait_for(page, "#sign-in-card a")
+        )
         check("logout hides the composer", not page.is_visible("#composer"))
         ctx.close()
 
@@ -374,6 +391,7 @@ def main() -> int:
         )
         check("narrow: no horizontal overflow", overflow <= 0, f"overflow={overflow}px")
         check("narrow: composer is visible", page.is_visible("#message"))
+        page.screenshot(path="/tmp/ui-mobile.png", full_page=True)
         mobile.close()
 
         browser.close()

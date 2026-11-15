@@ -4,6 +4,7 @@ const logEl = document.getElementById("log");
 const form = document.getElementById("composer");
 const input = document.getElementById("message");
 const newButton = document.getElementById("new");
+const signInCard = document.getElementById("sign-in-card");
 
 const STATUS_MESSAGES = {
   400: "the request was rejected",
@@ -14,40 +15,50 @@ const STATUS_MESSAGES = {
   503: "the server is not ready yet",
 };
 
+const LABELS = { you: "you", bot: "pydantachat", system: "system" };
+
 let sessionId = null;
 
 // textContent, never innerHTML: replies are untrusted.
 function line(kind, text) {
-  const li = document.createElement("li");
-  li.className = kind;
-  li.append(document.createElement("span"));
-  li.querySelector("span").textContent = text;
-  logEl.append(li);
-  li.scrollIntoView();
-  return li;
+  const article = document.createElement("article");
+  article.className = kind;
+
+  const header = document.createElement("header");
+  const label = document.createElement("small");
+  label.textContent = LABELS[kind] || kind;
+  header.append(label);
+
+  const body = document.createElement("p");
+  body.textContent = text;
+
+  article.append(header, body);
+  logEl.append(article);
+  article.scrollIntoView({ block: "nearest" });
+  return article;
 }
 
-function renderAnswer(li, answer) {
-  const body = li.querySelector("span");
+function renderAnswer(article, answer) {
+  const body = article.querySelector("p");
   if (typeof answer.number !== "number" || typeof answer.is_even !== "boolean") {
     body.textContent = "…";
     return;
   }
   body.textContent = `${answer.number} is ${answer.is_even ? "even" : "odd"}.`;
 
-  let reasoning = li.querySelector(".reasoning");
+  let reasoning = article.querySelector(".reasoning");
   if (answer.reasoning) {
     if (!reasoning) {
-      reasoning = document.createElement("em");
+      reasoning = document.createElement("small");
       reasoning.className = "reasoning";
-      li.append(reasoning);
+      article.append(reasoning);
     }
     reasoning.textContent = answer.reasoning;
   }
 }
 
 // The API sends `event: <name>` + `data: <json>` frames, then `data: [DONE]`.
-function consume(buffer, li) {
+function consume(buffer, article) {
   const frames = buffer.split("\n\n");
   const rest = frames.pop();
 
@@ -66,7 +77,7 @@ function consume(buffer, li) {
     } else if (event === "error") {
       line("system", "the provider failed; try again");
     } else if (payload !== "[DONE]") {
-      renderAnswer(li, JSON.parse(payload));
+      renderAnswer(article, JSON.parse(payload));
     }
   }
   return rest;
@@ -81,15 +92,23 @@ function link(href, text) {
 
 async function whoAmI() {
   const response = await fetch("/api/me", { credentials: "same-origin" });
+  const signedIn = response.ok;
+
   // Nothing chat-related renders without a session: no empty transcript, no box.
-  form.hidden = !response.ok;
-  logEl.hidden = !response.ok;
-  if (!response.ok) {
-    statusEl.replaceChildren("signed out · ", link("/login", "sign in"));
+  form.hidden = !signedIn;
+  logEl.hidden = !signedIn;
+  signInCard.hidden = signedIn;
+
+  if (!signedIn) {
+    statusEl.replaceChildren("signed out");
     return;
   }
   const user = await response.json();
   statusEl.replaceChildren(`${user.email} · `, link("/logout", "logout"));
+}
+
+function showSystem(message) {
+  line("system", message);
 }
 
 // Enter sends; Shift+Enter is a newline.
@@ -126,14 +145,13 @@ form.addEventListener("submit", async (event) => {
     });
   } catch {
     answerEl.remove();
-    line("system", "network error");
+    showSystem("network error");
     return;
   }
 
   if (!response.ok) {
     answerEl.remove();
-    line(
-      "system",
+    showSystem(
       STATUS_MESSAGES[response.status] || `request failed (${response.status})`,
     );
     if (response.status === 401) whoAmI();

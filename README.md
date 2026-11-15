@@ -53,6 +53,13 @@ Open <http://localhost:8000>: sign in with an allowlisted Google account and
 chat. The page is public and asks `/api/me` who is signed in; everything under
 `/api` requires credentials.
 
+The styling uses the design tokens from numbat's web app
+(`apps/web/src/styles/globals.css`): grey canvas, hairline borders, one indigo
+accent, Geist for UI. `theme.css` holds the tokens verbatim (same variable names)
+and `app.css` the components. The Geist and JetBrains Mono woff2 files are
+vendored under `static/fonts/`, never loaded from a CDN, because the page's CSP
+is `default-src 'self'`. Dark mode follows `prefers-color-scheme`.
+
 The same agent over HTTP, with two entry points over `Chat.send` and
 `Chat.send_stream`:
 
