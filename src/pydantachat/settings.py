@@ -203,3 +203,71 @@ class Settings(BaseModel):
 def get_settings() -> Settings:
     """The app's configuration, loaded once from `config.json`."""
     return Settings.from_file()
+
+
+@dataclass(frozen=True)
+class AuthConfig:
+    """Google OIDC and session settings. All of it is secret or deployment
+    specific, so it comes from the environment, never from `config.json`."""
+
+    google_client_id: str
+    google_client_secret: str
+    session_secret: str
+    allowed_emails: frozenset[str]
+    app_base_url: str
+
+    @property
+    def https(self) -> bool:
+        return self.app_base_url.startswith("https")
+
+    @property
+    def redirect_uri(self) -> str:
+        return f"{self.app_base_url}/auth"
+
+    def is_allowed(self, email: str | None) -> bool:
+        """Fail closed: an empty allowlist admits nobody.
+
+        zuchat's `is_allowed` treats an empty list as "any Google account", which
+        is fine for a static page and wrong for endpoints that spend money.
+        """
+        return bool(email) and email.lower() in self.allowed_emails
+
+    @classmethod
+    def from_env(cls) -> AuthConfig:
+        required = {
+            name: os.getenv(name, "").strip()
+            for name in (
+                "GOOGLE_CLIENT_ID",
+                "GOOGLE_CLIENT_SECRET",
+                "SESSION_SECRET",
+                "ALLOWED_EMAILS",
+            )
+        }
+        missing = [name for name, value in required.items() if not value]
+        if missing:
+            raise ConfigError(f"Set {', '.join(missing)} in .env to serve the API.")
+
+        emails = frozenset(
+            email.strip().lower()
+            for email in required["ALLOWED_EMAILS"].split(",")
+            if email.strip()
+        )
+        if not emails:
+            raise ConfigError(
+                "ALLOWED_EMAILS lists no addresses; the API fails closed rather "
+                "than let any Google account spend money."
+            )
+
+        return cls(
+            google_client_id=required["GOOGLE_CLIENT_ID"],
+            google_client_secret=required["GOOGLE_CLIENT_SECRET"],
+            session_secret=required["SESSION_SECRET"],
+            allowed_emails=emails,
+            app_base_url=os.getenv("APP_BASE_URL", "http://localhost:8000").rstrip("/"),
+        )
+
+
+@cache
+def get_auth() -> AuthConfig:
+    """The auth configuration, loaded once from the environment."""
+    return AuthConfig.from_env()

@@ -7,10 +7,14 @@ license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.14"
 dependencies = [
+    "authlib>=1.9.6",
+    "fastapi>=0.163.0",
+    "itsdangerous>=2.2.0",
     "opentelemetry-exporter-otlp-proto-http>=1.28.0",
     "opentelemetry-sdk>=1.28.0",
     "pydantic-ai-slim[evals,openai]>=2.68.0",
     "python-dotenv>=1.2.4",
+    "uvicorn[standard]>=0.54.0",
 ]
 
 [project.scripts]
@@ -19,6 +23,7 @@ pydantachat = "pydantachat.main:main"
 [dependency-groups]
 dev = [
     "basedpyright>=1.40.2",
+    "httpx>=0.28.1",
     "pytest>=8.4.0",
     "pytest-asyncio>=1.5.0",
     "ruff>=0.17.5",
