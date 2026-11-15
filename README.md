@@ -49,6 +49,10 @@ uv run python -m pydantachat.evals --thinking false  # output tool is forced
 make dev   # uvicorn pydantachat.app:api --reload on :8000
 ```
 
+Open <http://localhost:8000>: sign in with an allowlisted Google account and
+chat. The page is public and asks `/api/me` who is signed in; everything under
+`/api` requires credentials.
+
 The same agent over HTTP, with two entry points over `Chat.send` and
 `Chat.send_stream`:
 

@@ -7,8 +7,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.staticfiles import StaticFiles
 
-from pydantachat import routes_auth, routes_chat, routes_ops
+from pydantachat import pages, routes_auth, routes_chat, routes_ops
 from pydantachat.sessions import Sessions
 from pydantachat.settings import ConfigError, get_auth, get_settings
 
@@ -82,6 +83,8 @@ def create_app() -> FastAPI:
     app.include_router(routes_ops.router)
     app.include_router(routes_auth.router)
     app.include_router(routes_chat.router)
+    app.mount("/static", StaticFiles(directory=pages.STATIC_DIR), name="static")
+    app.include_router(pages.router)
     return app
 
 
