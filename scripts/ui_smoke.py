@@ -2,7 +2,7 @@
 
 Start the app first (`make dev`, or uvicorn on :8000), then:
 
-    uv run --with playwright python scripts/ui_smoke.py
+    uv run python scripts/ui_smoke.py
 
 It forges a session cookie from `SESSION_SECRET` so the OAuth round-trip can be
 skipped; the real Google flow is exercised by signing in once in a browser. The
@@ -18,6 +18,7 @@ import os
 import sys
 import time
 import traceback
+from typing import Literal
 
 from dotenv import load_dotenv
 from itsdangerous import TimestampSigner
@@ -52,7 +53,10 @@ def wait_contains(locator: Locator, needle: str, timeout: float = 60.0) -> bool:
 
 
 def wait_for(
-    page: Page, selector: str, state: str = "visible", timeout: float = 15.0
+    page: Page,
+    selector: str,
+    state: Literal["attached", "detached", "hidden", "visible"] = "visible",
+    timeout: float = 15.0,
 ) -> bool:
     try:
         page.wait_for_selector(selector, state=state, timeout=int(timeout * 1000))
