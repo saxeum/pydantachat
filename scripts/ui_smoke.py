@@ -25,6 +25,9 @@ from typing import Literal
 from dotenv import load_dotenv
 from itsdangerous import TimestampSigner
 
+from pydantachat.db import Database, customer_id_for
+from pydantachat.settings import Settings
+
 try:
     from playwright.sync_api import Locator, Page, sync_playwright
 except ModuleNotFoundError:  # pragma: no cover - environment problem
@@ -39,6 +42,10 @@ SIGNER = TimestampSigner(os.environ["SESSION_SECRET"])
 COOKIE = SIGNER.sign(
     base64.b64encode(json.dumps({"user": {"email": EMAIL, "name": "E2E"}}).encode())
 ).decode()
+
+# The seeded data decides the answer, so read the expectation from the same DB.
+ORDERS = Database(Settings.from_file().db_path).orders_for(customer_id_for(EMAIL))
+NEWEST_STATUS = ORDERS[0].status if ORDERS else ""
 
 results: list[tuple[str, bool, str]] = []
 
@@ -199,8 +206,8 @@ def main() -> int:
         # --- follow-up reuses the session ---------------------------------
         page.fill("#message", "What is the status of my latest order?")
         page.click("button[type=submit]")
-        ok = wait_contains(page.locator("#log article.bot p"), "delivered")
-        check("follow-up answers", ok)
+        ok = wait_contains(page.locator("#log article.bot p"), NEWEST_STATUS)
+        check("follow-up answers", ok, f"expected {NEWEST_STATUS!r}")
         check(
             "follow-up sends a session id",
             len(sent) > 1 and bool(sent[1].get("session_id")),
