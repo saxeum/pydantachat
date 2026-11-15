@@ -21,22 +21,25 @@ SYSTEM_PROMPT = (
     "`get_orders` tool before answering a question about orders; never guess or "
     "invent an order, a status, or a total. If the customer has no orders, say "
     "so. You can only see this customer's orders: if asked about another "
-    "customer, say you cannot access them. Answer in one or two short sentences."
+    "customer, say you cannot access them. When you state how many orders there "
+    "are, use the tool's count field rather than counting the rows yourself. "
+    "Answer in one or two short sentences."
 )
 
 
 def get_orders_tool(
     list_orders: ListOrders,
-) -> Callable[[], Awaitable[list[dict[str, str]]]]:
+) -> Callable[[], Awaitable[dict[str, object]]]:
     """Build the tool, bound to one customer's fetcher.
 
     No customer argument, on purpose: an argument would let the model pick the
     customer, and then the prompt would be the only guard.
     """
 
-    async def get_orders() -> list[dict[str, str]]:
-        """Return the signed-in customer's orders."""
-        return await list_orders()
+    async def get_orders() -> dict[str, object]:
+        """Return the signed-in customer's orders and how many there are."""
+        orders = await list_orders()
+        return {"count": len(orders), "orders": orders}
 
     return get_orders
 

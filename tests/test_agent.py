@@ -121,7 +121,7 @@ async def test_the_tool_returns_this_customers_orders() -> None:
     assert [call.tool_name for call in tool_calls] == ["get_orders"]
     tool_outputs = _tool_returns(chat.history)
     assert len(tool_outputs) == 1
-    assert tool_outputs[0].content == ORDERS
+    assert tool_outputs[0].content == {"count": len(ORDERS), "orders": ORDERS}
 
 
 def _tool_returns(messages: list[ModelMessage]) -> list[ToolReturnPart]:

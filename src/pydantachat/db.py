@@ -86,37 +86,55 @@ class Database:
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
 
+    def ensure_customers(self, emails: Iterable[str]) -> None:
+        """Create a row per email, once. Ids are derived, so re-running is safe."""
+        rows = [
+            (customer_id_for(email), email, email.split("@")[0])
+            for email in sorted({raw.strip().lower() for raw in emails if raw.strip()})
+        ]
+        with self._connect() as conn:
+            conn.executemany(
+                "INSERT OR IGNORE INTO customers (id, email, name) VALUES (?, ?, ?)",
+                rows,
+            )
+
+    def add_orders(self, orders: Iterable[Order]) -> int:
+        """Insert orders idempotently; return how many were new.
+
+        `INSERT OR IGNORE` plus stable ids means a second run adds nothing and
+        never rewrites existing rows.
+        """
+        with self._connect() as conn:
+            cursor = conn.executemany(
+                "INSERT OR IGNORE INTO orders "
+                "(id, customer_id, placed_at, status, total_cents) "
+                "VALUES (?, ?, ?, ?, ?)",
+                [
+                    (o.id, o.customer_id, o.placed_at, o.status, o.total_cents)
+                    for o in orders
+                ],
+            )
+            return max(cursor.rowcount, 0)
+
     def seed(self, emails: Iterable[str]) -> None:
-        """Give every allowlisted email a customer row and demo orders.
+        """Give every allowlisted email a customer row and three starter orders.
 
         Idempotent: ids are derived from the email and called out in the SQL, so
         restarting the app neither duplicates customers nor resets their orders.
         """
-        for email in sorted({raw.strip().lower() for raw in emails if raw.strip()}):
-            customer_id = customer_id_for(email)
-            with self._connect() as conn:
-                conn.execute(
-                    "INSERT OR IGNORE INTO customers (id, email, name) "
-                    "VALUES (?, ?, ?)",
-                    (customer_id, email, email.split("@")[0]),
-                )
-                conn.executemany(
-                    "INSERT OR IGNORE INTO orders "
-                    "(id, customer_id, placed_at, status, total_cents) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    [
-                        (
-                            f"{customer_id}-{n:02d}",
-                            customer_id,
-                            placed_at,
-                            status,
-                            cents,
-                        )
-                        for n, (placed_at, status, cents) in enumerate(
-                            DEMO_ORDERS, start=1
-                        )
-                    ],
-                )
+        emails = sorted({raw.strip().lower() for raw in emails if raw.strip()})
+        self.ensure_customers(emails)
+        self.add_orders(
+            Order(
+                id=f"{customer_id_for(email)}-{n:02d}",
+                customer_id=customer_id_for(email),
+                placed_at=placed_at,
+                status=status,
+                total_cents=cents,
+            )
+            for email in emails
+            for n, (placed_at, status, cents) in enumerate(DEMO_ORDERS, start=1)
+        )
 
     def customer_for_email(self, email: str) -> Customer | None:
         """The customer behind an authenticated email, or None. Fail closed."""

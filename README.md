@@ -120,6 +120,21 @@ For a browser-level check of the page (needs the app running): `make ui-smoke`, 
 URL or the browser binary. It forges a session cookie from `SESSION_SECRET`, so
 it skips the Google round-trip, and it is not part of CI.
 
+## Demo data
+
+The app seeds three starter orders for each allowlisted email. For a realistic
+history — 12 customers, 500 orders — run:
+
+```bash
+make seed-demo            # or: uv run python -m pydantachat.seed --customers 12 --orders 500
+```
+
+It is deterministic and idempotent: an order's id and fields derive from the
+customer id and its position, so a second run adds nothing and never rewrites a
+row. The addresses in `ALLOWED_EMAILS` are used first, so whoever signs in gets a
+real history, and the remaining customers are `demo01@example.com` onwards. The
+command prints the customer ids it created, which are what the orders API uses.
+
 ## Configuration
 
 Everything except secrets lives in `config.json`:
