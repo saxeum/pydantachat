@@ -14,5 +14,8 @@ jobs:
         with:
           python-version: "3.14"
       - run: uv sync --locked
+      - run: uv run --locked ruff check .
+      - run: uv run --locked ruff format --check .
+      - run: uv run --locked basedpyright
       - run: uv run --locked pytest
       - run: uv build

@@ -4,7 +4,7 @@ REPORTS_DIR ?= reports
 BASELINE ?= $(REPORTS_DIR)/baseline.json
 CURRENT ?= $(REPORTS_DIR)/current.json
 
-.PHONY: help test test-live evals evals-baseline evals-compare
+.PHONY: help test test-live lint typecheck evals evals-baseline evals-compare
 
 help:
 	@echo "Usage: make <target>"
@@ -13,6 +13,8 @@ help:
 	@echo "  help            Show this help"
 	@echo "  test            Run the offline test suite"
 	@echo "  test-live       Run the tests that call the real provider API"
+	@echo "  lint            Check formatting and lint rules"
+	@echo "  typecheck       Type-check src/ and tests/"
 	@echo "  evals           Run the eval suite"
 	@echo "  evals-baseline  Save a baseline report to $(BASELINE)"
 	@echo "  evals-compare   Run evals and compare against $(BASELINE)"
@@ -22,6 +24,13 @@ test:
 
 test-live:
 	uv run pytest -m live
+
+lint:
+	uv run ruff check .
+	uv run ruff format --check .
+
+typecheck:
+	uv run basedpyright
 
 evals:
 	uv run python -m pydantachat.evals

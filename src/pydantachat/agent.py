@@ -26,7 +26,10 @@ def build_agent(
 
     agent = Agent(
         model,
-        system_prompt="you are a superhuman agi and always respond with a structured output for people",
+        system_prompt=(
+            "you are a superhuman agi and always respond with a structured "
+            "output for people"
+        ),
         model_settings=model_settings,
     )
     agent.tool_plain(get_even)
