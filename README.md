@@ -43,6 +43,50 @@ uv run python -m pydantachat.evals --thinking high   # tool choice is 'auto'
 uv run python -m pydantachat.evals --thinking false  # output tool is forced
 ```
 
+## Web API
+
+```bash
+make dev   # uvicorn pydantachat.app:api --reload on :8000
+```
+
+The same agent over HTTP, with two entry points over `Chat.send` and
+`Chat.send_stream`:
+
+| Endpoint | What it does |
+| --- | --- |
+| `POST /api/chat` | one complete `EvennessAnswer` |
+| `POST /api/chat/stream` | the same answer as server-sent events, one partial per `data:` frame, ending with `data: [DONE]` |
+| `GET /api/me` | `{email, name, mode}` — `mode` is `cookie` or `bearer` |
+| `GET /health` | liveness; touches no configuration |
+| `GET /ready` | 503 until the config and the provider key are present |
+
+Requests carry `{message, session_id}`; `message` is capped at 4000 characters
+and a missing `session_id` starts a new conversation. Sessions are in-process,
+so the app runs a single worker and says so if `UVICORN_WORKERS`/`WEB_CONCURRENCY`
+asks for more (see #34 for the shared-store follow-up).
+
+### Auth
+
+Google OIDC, two credential types resolving to one identity:
+
+- **Cookie session** for the browser: `GET /login` → Google → `GET /auth` sets an
+  HttpOnly cookie and redirects to `/`; `GET /logout` clears it. Writes must be
+  `application/json` from our own origin (the CSRF gate).
+- **Bearer** for scripts: send a Google ID token obtained with our client id as
+  its audience. The server never issues tokens, it only verifies them against
+  Google's keys. `GET /login?format=json` returns the ID token as JSON at the end
+  of the same flow, for hand-testing.
+
+`ALLOWED_EMAILS` is required and **fails closed** — an empty list refuses to
+start rather than admitting any Google account. `GOOGLE_CLIENT_ID`,
+`GOOGLE_CLIENT_SECRET`, `SESSION_SECRET`, `ALLOWED_EMAILS` and `APP_BASE_URL`
+come from `.env`; register `<APP_BASE_URL>/auth` as a redirect URI on the shared
+Google client.
+
+Agent failures become generic responses — `502` for provider problems, `500` for
+a configuration error, `401`/`403` for credentials — with the detail logged
+rather than returned.
+
 ## Configuration
 
 Everything except secrets lives in `config.json`:

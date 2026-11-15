@@ -4,7 +4,7 @@ REPORTS_DIR ?= reports
 BASELINE ?= $(REPORTS_DIR)/baseline.json
 CURRENT ?= $(REPORTS_DIR)/current.json
 
-.PHONY: help test test-live lint typecheck evals evals-baseline evals-compare
+.PHONY: help test test-live lint typecheck dev evals evals-baseline evals-compare
 
 help:
 	@echo "Usage: make <target>"
@@ -15,6 +15,7 @@ help:
 	@echo "  test-live       Run the tests that call the real provider API"
 	@echo "  lint            Check formatting and lint rules"
 	@echo "  typecheck       Type-check src/ and tests/"
+	@echo "  dev             Serve the web API on :8000 with auto-reload"
 	@echo "  evals           Run the eval suite"
 	@echo "  evals-baseline  Save a baseline report to $(BASELINE)"
 	@echo "  evals-compare   Run evals and compare against $(BASELINE)"
@@ -31,6 +32,9 @@ lint:
 
 typecheck:
 	uv run basedpyright
+
+dev:
+	uv run uvicorn pydantachat.app:api --reload --port 8000
 
 evals:
 	uv run python -m pydantachat.evals
