@@ -101,11 +101,108 @@ header p {
   color: var(--muted-foreground);
 }
 
-#log article p {
-  margin: 0;
-  /* Replies are plain text: keep the model's line breaks and lists. */
-  white-space: pre-wrap;
+#log article .body {
   overflow-wrap: anywhere;
+}
+
+/* Markdown rendered by app.js: a deliberately small subset. */
+#log .body > :first-child {
+  margin-top: 0;
+}
+
+#log .body > :last-child {
+  margin-bottom: 0;
+}
+
+#log .body p,
+#log .body ul,
+#log .body ol,
+#log .body pre,
+#log .body blockquote,
+#log .body table {
+  margin: 0 0 0.55rem;
+}
+
+#log .body h3,
+#log .body h4,
+#log .body h5,
+#log .body h6 {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+  line-height: 1.3;
+}
+
+#log .body ul,
+#log .body ol {
+  padding-left: 1.25rem;
+}
+
+#log .body li {
+  margin: 0.1rem 0;
+}
+
+#log .body code {
+  padding: 0.1em 0.3em;
+  border-radius: var(--radius-sm);
+  background: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+
+#log .body pre {
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--muted);
+  overflow-x: auto;
+}
+
+#log .body pre code {
+  padding: 0;
+  background: none;
+  font-size: 0.8125rem;
+}
+
+#log .body blockquote {
+  padding-left: 0.7rem;
+  border-left: 2px solid var(--border);
+  color: var(--muted-foreground);
+}
+
+#log .body table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+#log .body th,
+#log .body td {
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+#log .body th {
+  background: var(--muted);
+  font-weight: 600;
+}
+
+#log .body a {
+  color: var(--primary);
+  text-underline-offset: 2px;
+}
+
+#log .body hr {
+  margin: 0.7rem 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+/* The user's own message is text, not markdown: keep their line breaks. */
+#log article.you .body,
+#log article.system .body {
+  white-space: pre-wrap;
 }
 
 #log article.you {
@@ -134,15 +231,6 @@ header p {
 
 #log article.system > header {
   display: none;
-}
-
-#log .reasoning {
-  display: block;
-  margin-top: 0.4rem;
-  padding-top: 0.4rem;
-  border-top: 1px solid var(--border);
-  font-size: 0.8125rem;
-  color: var(--muted-foreground);
 }
 
 /* --- composer ----------------------------------------------------------- */

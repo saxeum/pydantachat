@@ -70,6 +70,12 @@ and a missing `session_id` starts a new conversation. Sessions are in-process,
 so the app runs a single worker and says so if `UVICORN_WORKERS`/`WEB_CONCURRENCY`
 asks for more (see #34 for the shared-store follow-up).
 
+Replies are rendered as markdown: headings, lists, bold/italic, inline code and
+fenced blocks, quotes and links. `app.js` builds DOM nodes from text rather than
+`innerHTML`, and only `http(s)` links become anchors, so a reply (or a
+prompt-injected tool result) cannot inject markup. That keeps the page on
+`default-src 'self'` with no parser or sanitizer dependency.
+
 ### Auth
 
 Google OIDC, two credential types resolving to one identity:
