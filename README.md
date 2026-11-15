@@ -86,6 +86,19 @@ machine without a Google client. Every request is signed in as
 `local@localhost`; the provider key still comes from `.env` and never reaches
 the browser.
 
+The happy path:
+
+```bash
+cp .env.example .env      # then fill in DEEPSEEK_API_KEY (the default provider)
+make dev-local
+```
+
+Open <http://localhost:8000> (or <http://127.0.0.1:8000>), ask "what are my
+orders?", and the seeded `local@localhost` customer answers with three demo
+orders. There is no sign-in card and no Google client to register. The page
+shows `local@localhost · local mode` and, for a wide answer such as an order
+list, renders the model's markdown table.
+
 Local mode is deliberately constrained:
 
 - `APP_BASE_URL` must resolve to loopback (`localhost`, `127.0.0.1`, `::1`), or
