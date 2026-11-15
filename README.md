@@ -15,6 +15,34 @@ uv run pydantachat
 
 Python 3.14 or newer.
 
+## Output
+
+The agent answers as a validated `EvennessAnswer`, not free text, so the reply is
+the same shape every time and the fields are typed:
+
+```json
+{
+  "number": 4,
+  "is_even": true,
+  "reasoning": "4 leaves no remainder when divided by 2."
+}
+```
+
+The CLI prints that JSON. `Chat.send` returns the model; `Chat.send_stream`
+yields **partial models** as the schema fills in — once the output is typed there
+are no text deltas to stream.
+
+Structured output and thinking interact on DeepSeek. While thinking is on,
+DeepSeek rejects a forced tool choice, so Pydantic AI sends `tool_choice='auto'`
+and the model is free to answer in prose instead of calling the output tool; the
+run then retries rather than returning prose. With thinking off the output tool
+is forced again:
+
+```bash
+uv run python -m pydantachat.evals --thinking high   # tool choice is 'auto'
+uv run python -m pydantachat.evals --thinking false  # output tool is forced
+```
+
 ## Configuration
 
 Everything except secrets lives in `config.json`:

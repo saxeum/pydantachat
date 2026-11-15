@@ -24,9 +24,8 @@ async def run() -> None:
         if line.lower() in EXIT_COMMANDS:
             break
 
-        async for delta in chat.send_stream(line):
-            print(delta, end="", flush=True)
-        print()
+        answer = await chat.send(line)
+        print(answer.model_dump_json(indent=2))
 
 
 def main() -> None:
