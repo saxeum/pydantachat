@@ -1,15 +1,15 @@
 """Headless browser smoke test for the chat page. Not part of CI.
 
-Start the app first (`make dev`, or uvicorn on :8000), then:
-
-    uv run --with playwright python scripts/ui_smoke.py
+Start the app first (`make dev`, or uvicorn on :8000), then `make ui-smoke` (or
+`uv run python scripts/ui_smoke.py`).
 
 It forges a session cookie from `SESSION_SECRET` so the OAuth round-trip can be
 skipped; the real Google flow is exercised by signing in once in a browser. The
 assertions read the DOM through locators rather than evaluating JavaScript, and
 the context does not bypass CSP, so a CSP regression still shows up.
 
-Set `CHROME` to use a different browser binary.
+Set `BASE` to point at another origin, and `CHROME` to use a different browser
+binary.
 """
 
 import base64
@@ -18,10 +18,17 @@ import os
 import sys
 import time
 import traceback
+import urllib.request
+from pathlib import Path
+from typing import Literal
 
 from dotenv import load_dotenv
 from itsdangerous import TimestampSigner
-from playwright.sync_api import Locator, Page, sync_playwright
+
+try:
+    from playwright.sync_api import Locator, Page, sync_playwright
+except ModuleNotFoundError:  # pragma: no cover - environment problem
+    raise SystemExit("Playwright is not installed: run `uv sync`.") from None
 
 BASE = os.getenv("BASE", "http://localhost:8000")
 CHROME = os.getenv("CHROME", "/usr/bin/chromium")
@@ -34,6 +41,23 @@ COOKIE = SIGNER.sign(
 ).decode()
 
 results: list[tuple[str, bool, str]] = []
+
+
+def preflight() -> None:
+    """Fail with a fixable message rather than a browser timeout."""
+    try:
+        with urllib.request.urlopen(BASE + "/health", timeout=3) as response:
+            if response.status != 200:
+                raise SystemExit(f"{BASE}/health returned {response.status}")
+    except OSError as exc:
+        raise SystemExit(
+            f"no app at {BASE} ({exc}). Start it with `make dev` in another shell."
+        ) from None
+    if not Path(CHROME).exists():
+        raise SystemExit(
+            f"no browser at {CHROME}. Set CHROME=/path/to/chrome, or run "
+            "`uv run playwright install chromium` and point CHROME at it."
+        )
 
 
 def check(name: str, ok: bool, detail: str = "") -> None:
@@ -52,7 +76,10 @@ def wait_contains(locator: Locator, needle: str, timeout: float = 60.0) -> bool:
 
 
 def wait_for(
-    page: Page, selector: str, state: str = "visible", timeout: float = 15.0
+    page: Page,
+    selector: str,
+    state: Literal["attached", "detached", "hidden", "visible"] = "visible",
+    timeout: float = 15.0,
 ) -> bool:
     try:
         page.wait_for_selector(selector, state=state, timeout=int(timeout * 1000))
@@ -85,6 +112,7 @@ def sample_stream(page: Page, timeout: float = 90.0) -> tuple[list[str], str]:
 
 
 def main() -> int:
+    preflight()
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=CHROME)
         noise: list[str] = []
