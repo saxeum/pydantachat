@@ -53,6 +53,11 @@ Open <http://localhost:8000>: sign in with an allowlisted Google account and
 chat. The page is public and asks `/api/me` who is signed in; everything under
 `/api` requires credentials.
 
+The styling is [Pico CSS](https://picocss.com) v2.1.1, vendored at
+`src/pydantachat/static/pico.min.css` rather than linked from a CDN, because the
+page's CSP is `default-src 'self'`. `app.css` holds only the handful of rules
+Pico does not cover. Dark mode follows `color-scheme: light dark`.
+
 The same agent over HTTP, with two entry points over `Chat.send` and
 `Chat.send_stream`:
 

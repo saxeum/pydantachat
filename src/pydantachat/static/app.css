@@ -1,0 +1,73 @@
+/* Only what Pico does not already cover: transcript bubbles and column width. */
+
+/* Pico's container is wider than a comfortable chat column. */
+main.container {
+  max-width: 52rem;
+}
+
+#log {
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+#log:empty::before {
+  content: "No messages yet — ask whether a number is even.";
+  color: var(--pico-muted-color);
+}
+
+#log article {
+  margin: 0;
+  /* A pasted token or URL must not widen the grid past the viewport. */
+  min-width: 0;
+}
+
+#log article > header {
+  /* Pico draws a divider under an article header; a chat label should be quiet. */
+  margin-bottom: 0.35rem;
+  padding-bottom: 0;
+  border-bottom: 0;
+  background: none;
+}
+
+#log article > header small {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--pico-muted-color);
+}
+
+#log article p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+#log article.you {
+  border-inline-start: 4px solid var(--pico-primary);
+}
+
+#log article.bot {
+  border-inline-start: 4px solid var(--pico-secondary);
+}
+
+#log article.system {
+  background: none;
+  border-style: dashed;
+  color: var(--pico-muted-color);
+  font-style: italic;
+}
+
+#log .reasoning {
+  display: block;
+  margin-top: 0.4rem;
+  font-size: 0.9rem;
+  color: var(--pico-muted-color);
+}
+
+#status {
+  margin: 0;
+}
+
+#sign-in-card {
+  max-width: 28rem;
+  margin-inline: auto;
+}

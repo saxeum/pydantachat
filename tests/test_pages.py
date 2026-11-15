@@ -19,7 +19,16 @@ def test_index_is_the_chat_page(client: TestClient) -> None:
     assert response.headers["content-type"].startswith("text/html")
     assert 'id="composer"' in response.text
     assert 'id="log"' in response.text
+    assert 'id="sign-in-card"' in response.text
     assert "/static/app.js" in response.text
+
+
+def test_index_uses_pico(client: TestClient) -> None:
+    body = client.get("/").text
+
+    assert "/static/pico.min.css" in body
+    assert "/static/app.css" in body
+    assert 'name="color-scheme"' in body
 
 
 def test_index_carries_the_security_headers(client: TestClient) -> None:
@@ -31,7 +40,8 @@ def test_index_carries_the_security_headers(client: TestClient) -> None:
 
 def test_the_assets_are_served(client: TestClient) -> None:
     script = client.get("/static/app.js")
-    styles = client.get("/static/style.css")
+    styles = client.get("/static/app.css")
+    pico = client.get("/static/pico.min.css")
     icon = client.get("/static/favicon.svg")
 
     assert script.status_code == 200
@@ -40,10 +50,18 @@ def test_the_assets_are_served(client: TestClient) -> None:
     assert "localStorage" not in script.text
     assert styles.status_code == 200
     assert "text/css" in styles.headers["content-type"]
+    # Vendored, not a CDN: the page's CSP only allows 'self'.
+    assert pico.status_code == 200
+    assert "text/css" in pico.headers["content-type"]
+    assert "Pico CSS" in pico.text
     assert icon.status_code == 200
     assert "image/svg+xml" in icon.headers["content-type"]
     # Without it the browser asks for /favicon.ico and logs a 404.
     assert "/static/favicon.svg" in client.get("/").text
+
+
+def test_the_old_stylesheet_is_gone(client: TestClient) -> None:
+    assert client.get("/static/style.css").status_code == 404
 
 
 def test_denied_is_a_403_page(client: TestClient) -> None:
@@ -51,3 +69,4 @@ def test_denied_is_a_403_page(client: TestClient) -> None:
 
     assert response.status_code == 403
     assert "not allowed" in response.text
+    assert "/static/pico.min.css" in response.text
