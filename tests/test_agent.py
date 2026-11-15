@@ -28,10 +28,13 @@ CONFIG: dict[str, Any] = {
     "default_thinking": "low",
     "providers": {
         "acme": {
-            "models": ["acme-model", "acme-small"],
-            "thinking_levels": ["low", "high"],
+            "models": {
+                "acme-model": {"thinking_levels": ["low", "high"]},
+                "acme-small": {"thinking_levels": ["minimal"]},
+                "acme-plain": {"thinking_levels": []},
+            }
         },
-        "other": {"models": ["other-model"], "thinking_levels": []},
+        "other": {"models": {"other-model": {"thinking_levels": []}}},
     },
     "tracing": {"endpoint": None, "service_name": "tests"},
 }
@@ -89,14 +92,14 @@ def test_settings_rejects_disallowed_default_thinking() -> None:
 
 def test_settings_requires_at_least_one_model() -> None:
     with pytest.raises(ConfigError, match="config.json is invalid"):
-        settings(providers={"acme": {"models": []}})
+        settings(providers={"acme": {"models": {}}})
 
 
 def test_resolve_applies_overrides() -> None:
-    config = settings().resolve(model="acme-small", thinking="high")
+    config = settings().resolve(model="acme-small", thinking="minimal")
 
     assert config.model_id == "acme:acme-small"
-    assert config.thinking == "high"
+    assert config.thinking == "minimal"
 
 
 def test_resolve_rejects_unknown_provider() -> None:
@@ -110,13 +113,34 @@ def test_resolve_rejects_disallowed_model() -> None:
 
 
 def test_resolve_rejects_disallowed_thinking() -> None:
-    with pytest.raises(ConfigError, match="Thinking 'minimal' is not allowed"):
+    with pytest.raises(
+        ConfigError, match="Thinking 'minimal' is not allowed for acme:acme-model"
+    ):
         settings().resolve(thinking="minimal")
 
 
-def test_resolve_rejects_thinking_a_provider_does_not_offer() -> None:
-    with pytest.raises(ConfigError, match="Thinking 'low' is not allowed for 'other'"):
-        settings().resolve(provider="other", model="other-model", thinking="low")
+def test_thinking_levels_are_per_model() -> None:
+    # Same provider: 'minimal' is allowed on acme-small but not on acme-model.
+    assert settings().resolve(model="acme-small", thinking="minimal").thinking == (
+        "minimal"
+    )
+
+    with pytest.raises(
+        ConfigError, match="Thinking 'minimal' is not allowed for acme:acme-model"
+    ):
+        settings().resolve(model="acme-model", thinking="minimal")
+
+
+def test_model_without_thinking_support_refuses_any_level() -> None:
+    with pytest.raises(
+        ConfigError, match="Thinking 'low' is not allowed for acme:acme-plain"
+    ):
+        settings().resolve(model="acme-plain", thinking="low")
+
+
+def test_default_thinking_applies_to_the_default_model_only() -> None:
+    assert settings().resolve().thinking == "low"
+    assert settings().resolve(model="acme-small").thinking is None
 
 
 def test_resolve_requires_a_model_for_a_non_default_provider() -> None:
@@ -127,7 +151,7 @@ def test_resolve_requires_a_model_for_a_non_default_provider() -> None:
 def test_resolve_can_disable_thinking() -> None:
     config = settings(
         providers={
-            "acme": {"models": ["acme-model"], "thinking_levels": [False, "low"]}
+            "acme": {"models": {"acme-model": {"thinking_levels": [False, "low"]}}}
         }
     ).resolve(thinking=False)
 

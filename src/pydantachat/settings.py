@@ -3,9 +3,8 @@
 Everything except secrets lives in `config.json`:
 
 - `default_provider` / `default_model` / `default_thinking` — what to run.
-- `providers.<name>.models` — the models that may be requested.
-- `providers.<name>.thinking_levels` — the thinking levels that may be
-  requested from that provider.
+- `providers.<name>.models` — the models that may be requested, each with the
+  thinking levels (`thinking_levels`) that model accepts.
 - `tracing.endpoint` / `tracing.service_name` — where spans are exported.
 
 Secrets are API keys and nothing else, and they only ever come from the
@@ -83,11 +82,16 @@ class ModelConfig:
         return bool(self.api_key_env and os.getenv(self.api_key_env))
 
 
-class ProviderConfig(BaseModel):
-    """What the app is allowed to ask of one provider."""
+class ModelCapabilities(BaseModel):
+    """What one model accepts; thinking support varies model by model."""
 
-    models: list[str] = Field(min_length=1)
     thinking_levels: list[ThinkingSetting] = Field(default_factory=list)
+
+
+class ProviderConfig(BaseModel):
+    """The models the app may request from one provider."""
+
+    models: dict[str, ModelCapabilities] = Field(min_length=1)
 
 
 class TracingConfig(BaseModel):
@@ -121,12 +125,13 @@ class Settings(BaseModel):
     ) -> ModelConfig:
         """Return an allowed model, overriding the defaults where given.
 
-        `thinking=None` means "use `default_thinking`"; pass `False` to ask for
-        thinking to be off.
+        `thinking=None` means "use the configured default" when the default
+        model itself is selected, and "send no thinking setting" for any other
+        model. Pass `False` to ask for thinking to be off.
         """
         provider = provider or self.default_provider
-        config = self.providers.get(provider)
-        if config is None:
+        provider_config = self.providers.get(provider)
+        if provider_config is None:
             known = ", ".join(sorted(self.providers)) or "none"
             raise ConfigError(
                 f"Provider {provider!r} is not configured in config.json "
@@ -135,28 +140,34 @@ class Settings(BaseModel):
 
         if model is None:
             if provider != self.default_provider:
-                allowed = ", ".join(config.models)
+                allowed = ", ".join(provider_config.models)
                 raise ConfigError(
                     f"No model given for {provider!r}; pass one of: {allowed}."
                 )
             model = self.default_model
 
-        if model not in config.models:
-            allowed = ", ".join(config.models)
+        capabilities = provider_config.models.get(model)
+        if capabilities is None:
+            allowed = ", ".join(provider_config.models) or "none"
             raise ConfigError(
                 f"Model {model!r} is not allowed for {provider!r} (allowed: {allowed})."
             )
 
-        if thinking is None:
+        if thinking is None and (provider, model) == (
+            self.default_provider,
+            self.default_model,
+        ):
             thinking = self.default_thinking
-        if thinking is not None and thinking not in config.thinking_levels:
+        if thinking is not None and thinking not in capabilities.thinking_levels:
             allowed = (
-                ", ".join(thinking_label(level) for level in config.thinking_levels)
+                ", ".join(
+                    thinking_label(level) for level in capabilities.thinking_levels
+                )
                 or "none"
             )
             raise ConfigError(
                 f"Thinking {thinking_label(thinking)!r} is not allowed for "
-                f"{provider!r} (allowed: {allowed})."
+                f"{provider}:{model} (allowed: {allowed})."
             )
 
         return ModelConfig(provider=provider, model=model, thinking=thinking)

@@ -26,8 +26,11 @@ Everything except secrets lives in `config.json`:
   "default_thinking": "high",
   "providers": {
     "deepseek": {
-      "models": ["deepseek-flash"],
-      "thinking_levels": ["low", "medium", "high", "max"]
+      "models": {
+        "deepseek-flash": {
+          "thinking_levels": ["low", "medium", "high", "max"]
+        }
+      }
     }
   },
   "tracing": {"endpoint": "http://localhost:6006", "service_name": "pydantachat"}
@@ -37,13 +40,13 @@ Everything except secrets lives in `config.json`:
 - `default_provider` / `default_model` / `default_thinking` — what runs when
   nothing else is asked for. `default_thinking` takes a level, `true`, `false`,
   or `null` for the provider's own default.
-- `providers.<name>.models` — the models that may be requested from that
-  provider; anything else is refused before a request is made.
-- `providers.<name>.thinking_levels` — the unified thinking levels that
-  provider accepts. Pydantic AI translates them into each provider's native
-  control (DeepSeek `reasoning_effort`, OpenRouter `reasoning`, ...), so
-  listing only the levels a provider really honours keeps a silent downgrade
-  from passing as a measurement.
+- `providers.<name>.models.<model>` — the models that may be requested from that
+  provider, keyed by name, each with the `thinking_levels` that model accepts.
+  Thinking support belongs to the model, not the provider, so two models on one
+  provider can declare different levels.
+- `default_thinking` is the default for the **default model**; any other model
+  sends no thinking setting unless `--thinking` asks for one, rather than
+  inheriting a level that model may not support.
 - `tracing.endpoint` — OTLP base URL, e.g. `http://localhost:6006` for Phoenix;
   `null` turns tracing off. `tracing.service_name` defaults to `pydantachat`.
 
