@@ -21,13 +21,23 @@ client stays console-managed.
   ```
 - A downloaded OAuth client JSON, e.g. `~/.config/zuchat/google-oauth.json`.
 
-The project and secret ID have defaults (`saxeum-b9b1f`,
-`zuchat-google-oauth`).
+Copy the example variables file and fill it in. `terraform.tfvars` is
+git-ignored:
+
+```bash
+cp terraform.tfvars.example terraform.tfvars
+```
+
+```hcl
+project         = "saxeum-b9b1f"
+oauth_secret_id = "zuchat-google-oauth"
+```
 
 ## First apply
 
 ```bash
 cd terraform/gcloud
+cp terraform.tfvars.example terraform.tfvars   # then edit project / secret id
 terraform init
 terraform apply
 ```
