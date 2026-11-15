@@ -8,6 +8,7 @@ import pytest
 from pydantic_ai.exceptions import ModelHTTPError, UserError
 from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
+from pydantic_ai.models.test import TestModel
 
 from pydantachat import main as cli
 from pydantachat.agent import Chat, build_agent
@@ -103,8 +104,16 @@ def test_an_answer_is_printed_as_text(
     assert "You have three orders." in capsys.readouterr().out
 
 
-def test_the_cli_seeds_its_own_database(tmp_path) -> None:
+def test_the_cli_seeds_its_own_database(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The single-tenant CLI gets its own seeded database and order tool."""
+    real_build_agent = cli.build_agent
+
+    def build_with_test_model(**kwargs: object):
+        return real_build_agent(model=TestModel(), **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(cli, "build_agent", build_with_test_model)
     settings = Settings.from_file().model_copy(
         update={"db_path": str(tmp_path / "cli.db")}
     )
