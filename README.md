@@ -91,6 +91,11 @@ Agent failures become generic responses — `502` for provider problems, `500` f
 a configuration error, `401`/`403` for credentials — with the detail logged
 rather than returned.
 
+For a browser-level check of the page (needs the app running and
+`uv run --with playwright`): `python scripts/ui_smoke.py`. It forges a session
+cookie from `SESSION_SECRET`, so it skips the Google round-trip, and it is not
+part of CI.
+
 ## Configuration
 
 Everything except secrets lives in `config.json`:
