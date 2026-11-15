@@ -3,14 +3,12 @@
 Everything except secrets lives in `config.json`:
 
 - `default_provider` / `default_model` / `default_thinking` — what to run.
-- `providers.<name>.models` — the models that may be requested, each with the
-  thinking control it really offers (`thinking.levels`, `thinking.can_disable`).
+- `providers.<provider>.models.<model>.thinking` — the effort levels that
+  model accepts, and whether it can stop reasoning at all.
 - `tracing.endpoint` / `tracing.service_name` — where spans are exported.
 
-Secrets are API keys and nothing else, and they only ever come from the
-environment (`.env`) under the same names Pydantic AI itself reads:
-`DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, i.e.
-`<PROVIDER>_API_KEY` for whatever provider is selected.
+Secrets are API keys and nothing else, read from the environment (`.env`) under
+the names Pydantic AI itself uses, i.e. `<PROVIDER>_API_KEY`.
 """
 
 import json
@@ -18,12 +16,13 @@ import os
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
-from typing import cast
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, ValidationError, model_validator
 from pydantic_ai.settings import ModelSettings, ThinkingLevel
 
+# The providers read their key from the environment themselves, so the one
+# thing `.env` has to do is put it there.
 load_dotenv()
 
 DEFAULT_CONFIG_PATH = Path("config.json")
@@ -43,23 +42,14 @@ def thinking_label(thinking: ThinkingLevel | None) -> str:
 
 @dataclass(frozen=True)
 class ModelConfig:
-    """A fully resolved provider/model/thinking triple."""
+    """A resolved provider/model/thinking triple that `config.json` allows."""
 
     provider: str
     model: str
     thinking: ThinkingLevel | None = None
 
-    def validate(self) -> None:
-        """Raise if the provider or model is missing."""
-        if not self.provider or not self.model:
-            raise ConfigError(
-                "Set default_provider and default_model in config.json, "
-                "or pass --provider and --model."
-            )
-
     @property
     def model_id(self) -> str:
-        self.validate()
         return f"{self.provider}:{self.model}"
 
     @property
@@ -70,30 +60,44 @@ class ModelConfig:
 
     @property
     def api_key_env(self) -> str:
-        if not self.provider:
-            return ""
         return f"{self.provider.upper().replace('-', '_')}_API_KEY"
 
     @property
     def has_api_key(self) -> bool:
-        return bool(self.api_key_env and os.getenv(self.api_key_env))
+        return bool(os.getenv(self.api_key_env))
 
 
 class ThinkingConfig(BaseModel):
-    """A model's thinking control.
+    """What a model's thinking control really offers.
 
-    `levels` are the effort levels it accepts. `can_disable` says whether
-    thinking can actually be turned off: many models reason always-on, and
-    Pydantic AI then quietly sends the lowest effort instead, which would let
-    "off" be recorded as a measurement it never was.
+    `levels` are the effort levels it accepts; `can_disable` says whether
+    thinking can actually be stopped. A model that always reasons takes its
+    lowest effort when asked for `False`, so refusing the request is how "off"
+    stays honest.
     """
 
     levels: list[ThinkingLevel] = Field(default_factory=list)
     can_disable: bool = False
 
+    def check(self, label: str, thinking: ThinkingLevel) -> None:
+        """Raise unless this model can be asked for `thinking`."""
+        levels = ", ".join(thinking_label(level) for level in self.levels) or "none"
+        if thinking is False and not self.can_disable:
+            raise ConfigError(
+                f"Thinking cannot be disabled for {label}: it always reasons "
+                f"(levels: {levels})."
+            )
+        if thinking is True and not self.levels and not self.can_disable:
+            raise ConfigError(f"{label} has no thinking setting.")
+        if thinking not in (True, False, *self.levels):
+            raise ConfigError(
+                f"Thinking {thinking!r} is not allowed for {label} (allowed: {levels})."
+            )
 
-class ModelCapabilities(BaseModel):
-    """What one model accepts; thinking support varies model by model."""
+
+class ModelSpec(BaseModel):
+    """One allowed model. Thinking support varies model by model, so the
+    allow-lists live here rather than on the provider."""
 
     thinking: ThinkingConfig = Field(default_factory=ThinkingConfig)
 
@@ -101,12 +105,12 @@ class ModelCapabilities(BaseModel):
 class ProviderConfig(BaseModel):
     """The models the app may request from one provider."""
 
-    models: dict[str, ModelCapabilities] = Field(min_length=1)
+    models: dict[str, ModelSpec] = Field(min_length=1)
 
 
 class TracingConfig(BaseModel):
-    """OTel export target; `endpoint` is the OTLP base URL, e.g.
-    `http://localhost:6006` for Phoenix. Unset means no tracing."""
+    """OTel export target; `endpoint` is the OTLP base URL (`null` turns
+    tracing off), e.g. `http://localhost:6006` for Phoenix."""
 
     endpoint: str | None = None
     service_name: str = "pydantachat"
@@ -123,9 +127,12 @@ class Settings(BaseModel):
 
     @model_validator(mode="after")
     def _defaults_are_allowed(self) -> Settings:
-        # Fails at load time rather than on the first request.
-        self.resolve()
+        self.resolve()  # fail at load, not on the first request
         return self
+
+    @property
+    def model(self) -> ModelConfig:
+        return self.resolve()
 
     def resolve(
         self,
@@ -135,9 +142,9 @@ class Settings(BaseModel):
     ) -> ModelConfig:
         """Return an allowed model, overriding the defaults where given.
 
-        `thinking=None` means "use the configured default" when the default
-        model itself is selected, and "send no thinking setting" for any other
-        model. Pass `False` to ask for thinking to be off.
+        `thinking=None` keeps the configured default when the default model is
+        selected, and sends no thinking setting for any other model. Pass
+        `False` to ask for thinking to be off.
         """
         provider = provider or self.default_provider
         provider_config = self.providers.get(provider)
@@ -147,20 +154,21 @@ class Settings(BaseModel):
                 f"Provider {provider!r} is not configured in config.json "
                 f"(known: {known})."
             )
+        models = provider_config.models
 
         if model is None:
             if provider != self.default_provider:
-                allowed = ", ".join(provider_config.models)
                 raise ConfigError(
-                    f"No model given for {provider!r}; pass one of: {allowed}."
+                    f"No model given for {provider!r}; "
+                    f"pass one of: {', '.join(models)}."
                 )
             model = self.default_model
 
-        capabilities = provider_config.models.get(model)
-        if capabilities is None:
-            allowed = ", ".join(provider_config.models) or "none"
+        spec = models.get(model)
+        if spec is None:
             raise ConfigError(
-                f"Model {model!r} is not allowed for {provider!r} (allowed: {allowed})."
+                f"Model {model!r} is not allowed for {provider!r} "
+                f"(allowed: {', '.join(models) or 'none'})."
             )
 
         if thinking is None and (provider, model) == (
@@ -169,45 +177,9 @@ class Settings(BaseModel):
         ):
             thinking = self.default_thinking
         if thinking is not None:
-            self._check_thinking(provider, model, thinking, capabilities.thinking)
+            spec.thinking.check(f"{provider}:{model}", thinking)
 
-        return ModelConfig(provider=provider, model=model, thinking=thinking)
-
-    @staticmethod
-    def _check_thinking(
-        provider: str,
-        model: str,
-        thinking: ThinkingLevel,
-        config: ThinkingConfig,
-    ) -> None:
-        levels = ", ".join(thinking_label(level) for level in config.levels) or "none"
-        if thinking is False:
-            if not config.can_disable:
-                raise ConfigError(
-                    f"Thinking cannot be disabled for {provider}:{model}: it "
-                    f"always reasons (levels: {levels})."
-                )
-            return
-        if thinking is True:
-            if not config.levels and not config.can_disable:
-                raise ConfigError(f"{provider}:{model} has no thinking setting.")
-            return
-        if thinking not in config.levels:
-            raise ConfigError(
-                f"Thinking {thinking!r} is not allowed for {provider}:{model} "
-                f"(allowed: {levels})."
-            )
-
-    @property
-    def model(self) -> ModelConfig:
-        return self.resolve()
-
-    @classmethod
-    def from_dict(cls, data: dict[str, object]) -> Settings:
-        try:
-            return cls.model_validate(data)
-        except ValidationError as exc:
-            raise ConfigError(f"config.json is invalid:\n{exc}") from exc
+        return ModelConfig(provider, model, thinking)
 
     @classmethod
     def from_file(cls, path: Path | str = DEFAULT_CONFIG_PATH) -> Settings:
@@ -231,15 +203,3 @@ class Settings(BaseModel):
 def get_settings() -> Settings:
     """The app's configuration, loaded once from `config.json`."""
     return Settings.from_file()
-
-
-def thinking_from_cli(value: str | None) -> ThinkingLevel | None:
-    """Coerce a `--thinking` argument; None keeps the configured default."""
-    if value is None:
-        return None
-    lowered = value.strip().lower()
-    if lowered == "true":
-        return True
-    if lowered == "false":
-        return False
-    return cast(ThinkingLevel, lowered)

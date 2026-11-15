@@ -10,9 +10,10 @@ nondeterminism; treat the report as a measurement, not a pass/fail gate.
 import argparse
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic_ai import Agent
+from pydantic_ai.settings import ThinkingLevel
 from pydantic_evals import Case, Dataset
 from pydantic_evals.evaluators import (
     ArgumentCorrectness,
@@ -28,9 +29,20 @@ from pydantachat.settings import (
     ModelConfig,
     Settings,
     get_settings,
-    thinking_from_cli,
     thinking_label,
 )
+
+
+def thinking_from_cli(value: str | None) -> ThinkingLevel | None:
+    """Coerce a `--thinking` argument; None keeps the configured default."""
+    if value is None:
+        return None
+    lowered = value.strip().lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    return cast(ThinkingLevel, lowered)
 
 
 def _instrument() -> None:

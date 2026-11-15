@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 from pydantic_ai import Agent, models
 from pydantic_ai.messages import (
     ModelMessage,
@@ -16,12 +17,8 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
 
 from pydantachat.agent import Chat, build_agent, get_even
-from pydantachat.settings import (
-    ConfigError,
-    Settings,
-    thinking_from_cli,
-    thinking_label,
-)
+from pydantachat.evals import thinking_from_cli
+from pydantachat.settings import ConfigError, Settings, thinking_label
 
 CONFIG: dict[str, Any] = {
     "default_provider": "acme",
@@ -43,7 +40,7 @@ CONFIG: dict[str, Any] = {
 
 
 def settings(**overrides: Any) -> Settings:
-    return Settings.from_dict({**CONFIG, **overrides})
+    return Settings.model_validate({**CONFIG, **overrides})
 
 
 @pytest.fixture(autouse=True)
@@ -78,22 +75,22 @@ def test_settings_without_thinking_uses_provider_default() -> None:
 
 
 def test_settings_rejects_unknown_default_provider() -> None:
-    with pytest.raises(ConfigError, match="Provider 'missing' is not configured"):
+    with pytest.raises(ValidationError, match="Provider 'missing' is not configured"):
         settings(default_provider="missing")
 
 
 def test_settings_rejects_disallowed_default_model() -> None:
-    with pytest.raises(ConfigError, match="Model 'nope' is not allowed"):
+    with pytest.raises(ValidationError, match="Model 'nope' is not allowed"):
         settings(default_model="nope")
 
 
 def test_settings_rejects_disallowed_default_thinking() -> None:
-    with pytest.raises(ConfigError, match="Thinking 'medium' is not allowed"):
+    with pytest.raises(ValidationError, match="Thinking 'medium' is not allowed"):
         settings(default_thinking="medium")
 
 
 def test_settings_requires_at_least_one_model() -> None:
-    with pytest.raises(ConfigError, match="config.json is invalid"):
+    with pytest.raises(ValidationError, match="at least 1 item"):
         settings(providers={"acme": {"models": {}}})
 
 
@@ -169,7 +166,7 @@ def test_resolve_rejects_disabling_thinking_on_an_always_on_model() -> None:
 
 
 def test_settings_rejects_a_default_that_tries_to_disable_thinking() -> None:
-    with pytest.raises(ConfigError, match="Thinking cannot be disabled"):
+    with pytest.raises(ValidationError, match="Thinking cannot be disabled"):
         settings(default_thinking=False)
 
 
@@ -191,7 +188,7 @@ def test_has_no_api_key_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_tracing_is_off_by_default() -> None:
-    tracing = Settings.from_dict({**CONFIG, "tracing": {}}).tracing
+    tracing = Settings.model_validate({**CONFIG, "tracing": {}}).tracing
 
     assert tracing.endpoint is None
     assert tracing.service_name == "pydantachat"
