@@ -19,7 +19,7 @@ from pydantachat.app import create_app
 from pydantachat.auth import User, current_user, verify_id_token
 from pydantachat.routes_chat import get_sessions
 from pydantachat.sessions import Sessions
-from pydantachat.settings import AuthConfig, get_auth
+from pydantachat.settings import LOCAL_EMAIL, AuthConfig, ConfigError, get_auth
 
 CLIENT_ID = "client-id.apps.googleusercontent.com"
 ALLOWED = "me@example.com"
@@ -33,6 +33,24 @@ def configured(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setenv("SESSION_SECRET", "test-session-secret")
     monkeypatch.setenv("ALLOWED_EMAILS", ALLOWED)
     monkeypatch.setenv("APP_BASE_URL", BASE_URL)
+    monkeypatch.delenv("AUTH_MODE", raising=False)
+    get_auth.cache_clear()
+    yield
+    get_auth.cache_clear()
+
+
+@pytest.fixture
+def local_auth(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Local mode: no Google client, no allowlist, a loopback base URL."""
+    monkeypatch.setenv("AUTH_MODE", "local")
+    monkeypatch.setenv("APP_BASE_URL", "http://localhost:8000")
+    for name in (
+        "GOOGLE_CLIENT_ID",
+        "GOOGLE_CLIENT_SECRET",
+        "SESSION_SECRET",
+        "ALLOWED_EMAILS",
+    ):
+        monkeypatch.delenv(name, raising=False)
     get_auth.cache_clear()
     yield
     get_auth.cache_clear()
@@ -99,6 +117,7 @@ def test_health_needs_no_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_ready_is_503_without_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
+    monkeypatch.delenv("AUTH_MODE", raising=False)
     get_auth.cache_clear()
 
     assert TestClient(create_app()).get("/ready").status_code == 503
@@ -238,6 +257,94 @@ def test_a_stale_oauth_state_restarts_sign_in(
     assert "OAuth state mismatch" in caplog.text
 
 
+def test_local_mode_needs_no_google_configuration(local_auth: None) -> None:
+    config = get_auth()
+
+    assert config.local
+    assert config.allowed_emails == frozenset({LOCAL_EMAIL})
+
+
+def test_local_mode_signs_in_loopback_requests(local_auth: None) -> None:
+    client = TestClient(
+        create_app(), base_url="http://localhost:8000", client=("127.0.0.1", 50000)
+    )
+
+    response = client.get("/api/me")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "email": LOCAL_EMAIL,
+        "name": "Local",
+        "mode": "local",
+    }
+
+
+def test_local_mode_refuses_non_loopback_clients(local_auth: None) -> None:
+    client = TestClient(
+        create_app(), base_url="http://localhost:8000", client=("203.0.113.9", 50000)
+    )
+
+    assert client.get("/api/me").status_code == 403
+
+
+def test_local_mode_skips_the_google_flow(local_auth: None) -> None:
+    client = TestClient(
+        create_app(), base_url="http://localhost:8000", client=("127.0.0.1", 50000)
+    )
+
+    response = client.get("/login", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/"
+
+
+def test_local_mode_refuses_a_public_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AUTH_MODE", "local")
+    monkeypatch.setenv("APP_BASE_URL", "https://pydantachat.example.com")
+    get_auth.cache_clear()
+    try:
+        with pytest.raises(ConfigError, match="loopback-only"):
+            get_auth()
+    finally:
+        get_auth.cache_clear()
+
+
+def test_local_mode_still_requires_same_origin_writes(local_auth: None) -> None:
+    client = TestClient(
+        create_app(), base_url="http://localhost:8000", client=("127.0.0.1", 50000)
+    )
+
+    response = client.post(
+        "/api/chat",
+        json={"message": "hi"},
+        headers={"origin": "https://evil.example"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_local_mode_accepts_the_loopback_origin_actually_used(
+    local_auth: None,
+) -> None:
+    """127.0.0.1 is fine even when APP_BASE_URL says localhost."""
+    api = create_app()
+    sessions = Sessions(
+        make_chat=lambda _owner, _session: Chat(agent=build_agent(_answering()))
+    )
+    api.dependency_overrides[get_sessions] = lambda: sessions
+    client = TestClient(
+        api, base_url="http://127.0.0.1:8000", client=("127.0.0.1", 50000)
+    )
+
+    response = client.post(
+        "/api/chat",
+        json={"message": "hi"},
+        headers={"origin": "http://127.0.0.1:8000"},
+    )
+
+    assert response.status_code == 200
+
+
 # --- chat ------------------------------------------------------------------
 
 
@@ -332,6 +439,7 @@ def test_streaming_reports_a_provider_failure(configured: None) -> None:
 
 def test_startup_refuses_without_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
+    monkeypatch.delenv("AUTH_MODE", raising=False)
     get_auth.cache_clear()
 
     with (

@@ -320,7 +320,11 @@ async function whoAmI() {
     return;
   }
   const user = await response.json();
-  statusEl.replaceChildren(`${user.email} · `, link("/logout", "logout"));
+  if (user.mode === "local") {
+    statusEl.replaceChildren(`${user.email} · local mode`);
+  } else {
+    statusEl.replaceChildren(`${user.email} · `, link("/logout", "logout"));
+  }
 }
 
 function showSystem(message) {
@@ -367,11 +371,15 @@ form.addEventListener("submit", async (event) => {
 
   if (!response.ok) {
     answerEl.remove();
+    const payload = await response.json().catch(() => null);
+    const detail =
+      payload && typeof payload.detail === "string" ? payload.detail : null;
     showSystem(
-      STATUS_MESSAGES[response.status] || `request failed (${response.status})`,
+      detail ||
+        STATUS_MESSAGES[response.status] ||
+        `request failed (${response.status})`,
     );
     if (response.status === 401) whoAmI();
-    return;
   }
 
   const reader = response.body.getReader();

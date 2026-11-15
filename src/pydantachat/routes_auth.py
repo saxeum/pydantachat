@@ -25,6 +25,15 @@ JSON_FORMAT_KEY = "auth_format"
 async def login(request: Request, format: str | None = None) -> Response:
     """Send the browser to Google's account chooser."""
     config = get_auth()
+    if config.local:
+        # No sign-in exists in local mode; the page is already authenticated.
+        if format == "json":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="local mode has no Google sign-in flow",
+            )
+        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+
     oauth = configure_oauth(config)
 
     if format == "json":
@@ -38,6 +47,9 @@ async def login(request: Request, format: str | None = None) -> Response:
 async def auth(request: Request) -> Response:
     """OAuth callback: verify, allowlist, then remember or hand back the token."""
     config = get_auth()
+    if config.local:
+        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+
     oauth = configure_oauth(config)
     wants_json = request.session.pop(JSON_FORMAT_KEY, None) == "json"
 

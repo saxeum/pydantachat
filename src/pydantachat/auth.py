@@ -19,7 +19,7 @@ from joserfc.errors import JoseError
 from joserfc.jwk import KeySet
 from joserfc.jwt import JWTClaimsRegistry
 
-from pydantachat.settings import AuthConfig, get_auth
+from pydantachat.settings import LOCAL_EMAIL, AuthConfig, get_auth, is_loopback_host
 
 GOOGLE_DISCOVERY = "https://accounts.google.com/.well-known/openid-configuration"
 GOOGLE_JWKS = "https://www.googleapis.com/oauth2/v3/certs"
@@ -54,7 +54,7 @@ class User:
 
     email: str
     name: str = ""
-    mode: Literal["cookie", "bearer"] = "cookie"
+    mode: Literal["cookie", "bearer", "local"] = "cookie"
 
 
 def _unauthorised(detail: str) -> HTTPException:
@@ -64,6 +64,25 @@ def _unauthorised(detail: str) -> HTTPException:
         # RFC 9110: a 401 must carry a challenge.
         headers={"WWW-Authenticate": 'Bearer realm="pydantachat"'},
     )
+
+
+def _require_loopback(request: Request) -> None:
+    """Local mode belongs to the machine it runs on, not the network."""
+    client = request.client
+    if (
+        not is_loopback_host(request.url.hostname)
+        or client is None
+        or not is_loopback_host(client.host)
+    ):
+        logger.warning(
+            "local auth mode rejected %s (client %s)",
+            request.url.hostname,
+            client.host if client else "unknown",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="local auth mode accepts loopback requests only",
+        )
 
 
 @cache
@@ -96,11 +115,14 @@ def verify_id_token(
 
 
 def _check_csrf(request: Request, config: AuthConfig) -> None:
-    """Cookie-authenticated writes must come from our own origin.
+    """Cookie- or local-authenticated writes must come from our own origin.
 
     `SameSite=Lax` already keeps the cookie off cross-site POSTs; this is the
     cheap second gate, and bearer requests are exempt because they carry no
-    ambient credential.
+    ambient credential. Local mode has no cookie to protect, but it keeps the
+    gate so another site cannot spend the provider key through the browser; it
+    compares against the loopback origin the request actually used, so both
+    `localhost` and `127.0.0.1` work.
     """
     if request.method in SAFE_METHODS:
         return
@@ -111,7 +133,10 @@ def _check_csrf(request: Request, config: AuthConfig) -> None:
         )
     origin = request.headers.get("origin")
     if origin is not None:
-        if origin.rstrip("/") != config.app_base_url:
+        expected = (
+            str(request.base_url).rstrip("/") if config.local else config.app_base_url
+        )
+        if origin.rstrip("/") != expected:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="cross-origin request refused",
@@ -132,8 +157,13 @@ def _allowed(config: AuthConfig, user: User) -> User:
 
 
 async def current_user(request: Request) -> User:
-    """Resolve the caller: bearer ID token first, then the session cookie."""
+    """Resolve the caller: local mode, then bearer token, then session cookie."""
     config = get_auth()
+
+    if config.local:
+        _require_loopback(request)
+        _check_csrf(request, config)
+        return User(email=LOCAL_EMAIL, name="Local", mode="local")
 
     header = request.headers.get("authorization", "")
     if header.lower().startswith(BEARER_PREFIX):

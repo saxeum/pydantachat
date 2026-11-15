@@ -4,7 +4,7 @@ REPORTS_DIR ?= reports
 BASELINE ?= $(REPORTS_DIR)/baseline.json
 CURRENT ?= $(REPORTS_DIR)/current.json
 
-.PHONY: help test test-live lint typecheck dev ui-smoke seed-demo evals evals-baseline evals-compare
+.PHONY: help test test-live lint typecheck dev dev-local ui-smoke seed-demo evals evals-baseline evals-compare
 
 help:
 	@echo "Usage: make <target>"
@@ -16,6 +16,7 @@ help:
 	@echo "  lint            Check formatting and lint rules"
 	@echo "  typecheck       Type-check src/, tests/ and scripts/"
 	@echo "  dev             Serve the web API on :8000 with auto-reload"
+	@echo "  dev-local       Same, with local auth (no Google sign-in)"
 	@echo "  ui-smoke        Drive the chat page in headless Chromium (run dev first)"
 	@echo "  seed-demo       Add 12 demo customers and 500 orders to the database"
 	@echo "  evals           Run the eval suite"
@@ -37,6 +38,9 @@ typecheck:
 
 dev:
 	uv run uvicorn pydantachat.app:api --reload --port 8000
+
+dev-local:
+	AUTH_MODE=local uv run uvicorn pydantachat.app:api --reload --port 8000
 
 ui-smoke:
 	uv run python scripts/ui_smoke.py
