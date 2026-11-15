@@ -1,0 +1,75 @@
+name: live
+
+# The opt-in pass: real provider calls, on demand and once a week. PR CI stays
+# offline, so nothing here runs on a pull request.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays, 06:00 UTC
+
+concurrency:
+  group: live-evals
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          python-version: "3.14"
+      - run: uv sync --locked
+
+      - name: Require the provider key
+        # A missing secret is an infrastructure failure, not a model result, so
+        # fail here rather than letting the live tests skip and the evals report
+        # a "measured" run that never happened.
+        run: |
+          if [ -z "$DEEPSEEK_API_KEY" ]; then
+            echo "::error::DEEPSEEK_API_KEY is not set; add it as a repository secret."
+            exit 1
+          fi
+
+      - name: Live smoke tests
+        run: uv run --locked pytest -m live
+
+      - name: Restore the previous eval report
+        uses: actions/cache/restore@v4
+        with:
+          path: reports
+          key: evals-${{ github.run_id }}
+          restore-keys: evals-
+
+      - name: Evals
+        # A failing assertion is a model-quality signal that belongs in the
+        # report, not a red build; `evals` exits 0 either way. Auth and network
+        # errors raise, so those turns the step red.
+        run: |
+          if [ -f reports/baseline.json ]; then
+            make evals-compare
+          else
+            echo "No baseline yet; writing one."
+            make evals-baseline
+          fi
+
+      - name: Save the report for the next run
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: reports
+          key: evals-${{ github.run_id }}
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: reports/
+          if-no-files-found: warn
