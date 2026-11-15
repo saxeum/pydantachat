@@ -29,12 +29,13 @@ CONFIG: dict[str, Any] = {
     "providers": {
         "acme": {
             "models": {
-                "acme-model": {"thinking_levels": ["low", "high"]},
-                "acme-small": {"thinking_levels": ["minimal"]},
-                "acme-plain": {"thinking_levels": []},
+                "acme-model": {"thinking": {"levels": ["low", "high"]}},
+                "acme-small": {"thinking": {"levels": ["minimal"]}},
+                "acme-plain": {},
+                "acme-off": {"thinking": {"levels": ["low"], "can_disable": True}},
             }
         },
-        "other": {"models": {"other-model": {"thinking_levels": []}}},
+        "other": {"models": {"other-model": {}}},
     },
     "tracing": {"endpoint": None, "service_name": "tests"},
 }
@@ -137,6 +138,9 @@ def test_model_without_thinking_support_refuses_any_level() -> None:
     ):
         settings().resolve(model="acme-plain", thinking="low")
 
+    with pytest.raises(ConfigError, match="acme:acme-plain has no thinking setting"):
+        settings().resolve(model="acme-plain", thinking=True)
+
 
 def test_default_thinking_applies_to_the_default_model_only() -> None:
     assert settings().resolve().thinking == "low"
@@ -148,15 +152,24 @@ def test_resolve_requires_a_model_for_a_non_default_provider() -> None:
         settings().resolve(provider="other")
 
 
-def test_resolve_can_disable_thinking() -> None:
-    config = settings(
-        providers={
-            "acme": {"models": {"acme-model": {"thinking_levels": [False, "low"]}}}
-        }
-    ).resolve(thinking=False)
+def test_resolve_can_disable_thinking_when_the_model_allows_it() -> None:
+    config = settings().resolve(model="acme-off", thinking=False)
 
     assert config.thinking is False
     assert config.model_settings == {"thinking": False}
+
+
+def test_resolve_rejects_disabling_thinking_on_an_always_on_model() -> None:
+    with pytest.raises(
+        ConfigError,
+        match="Thinking cannot be disabled for acme:acme-model: it always reasons",
+    ):
+        settings().resolve(thinking=False)
+
+
+def test_settings_rejects_a_default_that_tries_to_disable_thinking() -> None:
+    with pytest.raises(ConfigError, match="Thinking cannot be disabled"):
+        settings(default_thinking=False)
 
 
 def test_api_key_env_is_provider_specific(

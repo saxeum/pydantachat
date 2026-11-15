@@ -28,7 +28,10 @@ Everything except secrets lives in `config.json`:
     "deepseek": {
       "models": {
         "deepseek-flash": {
-          "thinking_levels": ["low", "medium", "high", "max"]
+          "thinking": {
+            "levels": ["low", "medium", "high", "max"],
+            "can_disable": false
+          }
         }
       }
     }
@@ -38,12 +41,17 @@ Everything except secrets lives in `config.json`:
 ```
 
 - `default_provider` / `default_model` / `default_thinking` — what runs when
-  nothing else is asked for. `default_thinking` takes a level, `true`, `false`,
-  or `null` for the provider's own default.
+  nothing else is asked for.
 - `providers.<name>.models.<model>` — the models that may be requested from that
-  provider, keyed by name, each with the `thinking_levels` that model accepts.
-  Thinking support belongs to the model, not the provider, so two models on one
-  provider can declare different levels.
+  provider, keyed by name, each declaring the thinking control that model
+  actually offers. Thinking support belongs to the model, not the provider.
+- `thinking.levels` — the effort levels that model accepts. Pydantic AI maps an
+  unsupported level to the nearest accepted one, so declaring only the real
+  range is what keeps a silent downgrade from being recorded as a measurement.
+- `thinking.can_disable` — whether turning thinking off is honest for that
+  model. Plenty of models always reason (`deepseek-flash`, `gpt-5-nano`); for
+  those, `thinking=False` makes Pydantic AI send the lowest effort instead, so
+  the app refuses the request rather than log an "off" run that wasn't.
 - `default_thinking` is the default for the **default model**; any other model
   sends no thinking setting unless `--thinking` asks for one, rather than
   inheriting a level that model may not support.

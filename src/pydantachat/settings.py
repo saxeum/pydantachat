@@ -4,7 +4,7 @@ Everything except secrets lives in `config.json`:
 
 - `default_provider` / `default_model` / `default_thinking` — what to run.
 - `providers.<name>.models` — the models that may be requested, each with the
-  thinking levels (`thinking_levels`) that model accepts.
+  thinking control it really offers (`thinking.levels`, `thinking.can_disable`).
 - `tracing.endpoint` / `tracing.service_name` — where spans are exported.
 
 Secrets are API keys and nothing else, and they only ever come from the
@@ -28,15 +28,12 @@ load_dotenv()
 
 DEFAULT_CONFIG_PATH = Path("config.json")
 
-# The unified pydantic-ai setting: an effort level, or True/False.
-ThinkingSetting = bool | ThinkingLevel
-
 
 class ConfigError(ValueError):
     """The configuration is missing, or forbids what was asked for."""
 
 
-def thinking_label(thinking: ThinkingSetting | None) -> str:
+def thinking_label(thinking: ThinkingLevel | None) -> str:
     if thinking is None:
         return "provider default"
     if isinstance(thinking, bool):
@@ -50,7 +47,7 @@ class ModelConfig:
 
     provider: str
     model: str
-    thinking: ThinkingSetting | None = None
+    thinking: ThinkingLevel | None = None
 
     def validate(self) -> None:
         """Raise if the provider or model is missing."""
@@ -82,10 +79,23 @@ class ModelConfig:
         return bool(self.api_key_env and os.getenv(self.api_key_env))
 
 
+class ThinkingConfig(BaseModel):
+    """A model's thinking control.
+
+    `levels` are the effort levels it accepts. `can_disable` says whether
+    thinking can actually be turned off: many models reason always-on, and
+    Pydantic AI then quietly sends the lowest effort instead, which would let
+    "off" be recorded as a measurement it never was.
+    """
+
+    levels: list[ThinkingLevel] = Field(default_factory=list)
+    can_disable: bool = False
+
+
 class ModelCapabilities(BaseModel):
     """What one model accepts; thinking support varies model by model."""
 
-    thinking_levels: list[ThinkingSetting] = Field(default_factory=list)
+    thinking: ThinkingConfig = Field(default_factory=ThinkingConfig)
 
 
 class ProviderConfig(BaseModel):
@@ -107,7 +117,7 @@ class Settings(BaseModel):
 
     default_provider: str
     default_model: str
-    default_thinking: ThinkingSetting | None = None
+    default_thinking: ThinkingLevel | None = None
     providers: dict[str, ProviderConfig]
     tracing: TracingConfig = Field(default_factory=TracingConfig)
 
@@ -121,7 +131,7 @@ class Settings(BaseModel):
         self,
         provider: str | None = None,
         model: str | None = None,
-        thinking: ThinkingSetting | None = None,
+        thinking: ThinkingLevel | None = None,
     ) -> ModelConfig:
         """Return an allowed model, overriding the defaults where given.
 
@@ -158,19 +168,35 @@ class Settings(BaseModel):
             self.default_model,
         ):
             thinking = self.default_thinking
-        if thinking is not None and thinking not in capabilities.thinking_levels:
-            allowed = (
-                ", ".join(
-                    thinking_label(level) for level in capabilities.thinking_levels
-                )
-                or "none"
-            )
-            raise ConfigError(
-                f"Thinking {thinking_label(thinking)!r} is not allowed for "
-                f"{provider}:{model} (allowed: {allowed})."
-            )
+        if thinking is not None:
+            self._check_thinking(provider, model, thinking, capabilities.thinking)
 
         return ModelConfig(provider=provider, model=model, thinking=thinking)
+
+    @staticmethod
+    def _check_thinking(
+        provider: str,
+        model: str,
+        thinking: ThinkingLevel,
+        config: ThinkingConfig,
+    ) -> None:
+        levels = ", ".join(thinking_label(level) for level in config.levels) or "none"
+        if thinking is False:
+            if not config.can_disable:
+                raise ConfigError(
+                    f"Thinking cannot be disabled for {provider}:{model}: it "
+                    f"always reasons (levels: {levels})."
+                )
+            return
+        if thinking is True:
+            if not config.levels and not config.can_disable:
+                raise ConfigError(f"{provider}:{model} has no thinking setting.")
+            return
+        if thinking not in config.levels:
+            raise ConfigError(
+                f"Thinking {thinking!r} is not allowed for {provider}:{model} "
+                f"(allowed: {levels})."
+            )
 
     @property
     def model(self) -> ModelConfig:
@@ -207,7 +233,7 @@ def get_settings() -> Settings:
     return Settings.from_file()
 
 
-def thinking_from_cli(value: str | None) -> ThinkingSetting | None:
+def thinking_from_cli(value: str | None) -> ThinkingLevel | None:
     """Coerce a `--thinking` argument; None keeps the configured default."""
     if value is None:
         return None

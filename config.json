@@ -6,21 +6,30 @@
     "deepseek": {
       "models": {
         "deepseek-flash": {
-          "thinking_levels": ["low", "medium", "high", "max"]
+          "thinking": {
+            "levels": ["low", "medium", "high", "max"],
+            "can_disable": false
+          }
         }
       }
     },
     "openai": {
       "models": {
         "gpt-5-nano": {
-          "thinking_levels": ["minimal", "low", "medium", "high"]
+          "thinking": {
+            "levels": ["minimal", "low", "medium", "high"],
+            "can_disable": false
+          }
         }
       }
     },
     "openrouter": {
       "models": {
         "nvidia/nemotron-3-super-120b-a12b": {
-          "thinking_levels": ["minimal", "low", "medium", "high"]
+          "thinking": {
+            "levels": ["minimal", "low", "medium", "high"],
+            "can_disable": false
+          }
         }
       }
     }
