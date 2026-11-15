@@ -30,7 +30,7 @@ lint:
 	uv run ruff format --check .
 
 typecheck:
-	uv run pyright
+	uv run basedpyright
 
 evals:
 	uv run python -m pydantachat.evals

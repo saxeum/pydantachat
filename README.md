@@ -79,7 +79,7 @@ three can sit there at once.
 make test        # or: uv run pytest          -- offline, TestModel/FunctionModel only
 make test-live   # or: uv run pytest -m live  -- hits the real provider API
 make lint        # ruff check + ruff format --check
-make typecheck   # pyright, standard mode
+make typecheck   # basedpyright, standard mode
 ```
 
 The live suite is skipped unless the default provider's API key is set (in the

@@ -18,7 +18,7 @@ pydantachat = "pydantachat.main:main"
 
 [dependency-groups]
 dev = [
-    "pyright>=1.1.414",
+    "basedpyright>=1.40.2",
     "pytest>=8.4.0",
     "pytest-asyncio>=1.5.0",
     "ruff>=0.17.5",
@@ -40,7 +40,7 @@ select = ["E", "W", "F", "I", "UP", "B", "SIM", "C4", "RUF"]
 [tool.ruff.lint.isort]
 known-first-party = ["pydantachat"]
 
-[tool.pyright]
+[tool.basedpyright]
 include = ["src", "tests"]
 pythonVersion = "3.14"
 typeCheckingMode = "standard"
