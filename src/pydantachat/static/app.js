@@ -19,6 +19,181 @@ const LABELS = { you: "you", bot: "pydantachat", system: "system" };
 
 let sessionId = null;
 
+// --- markdown -------------------------------------------------------------
+// Replies arrive as markdown. This renders a small subset into DOM nodes:
+// every piece of text goes through textContent and links are http(s) only, so a
+// reply (or a prompt-injected tool result) cannot inject HTML. That keeps the
+// page on `default-src 'self'` with no parser dependency and no sanitizer.
+
+const SAFE_LINK = /^https?:\/\//i;
+const INLINE =
+  /(`[^`\n]+`|\*\*[^*\n]+\*\*|__[^_\n]+__|\*[^*\n]+\*|_[^_\n]+_|\[[^\]\n]+\]\([^)\s]+\))/g;
+const FENCE = /^\s*```(\S*)\s*$/;
+const HEADING = /^(#{1,6})\s+(.*)$/;
+const RULE = /^\s*([-*_])\1{2,}\s*$/;
+const QUOTE = /^\s*>\s?(.*)$/;
+const UNORDERED = /^\s*[-*+]\s+(.*)$/;
+const ORDERED = /^\s*(\d+)[.)]\s+(.*)$/;
+
+function inlineNode(token) {
+  if (token.startsWith("`")) {
+    const code = document.createElement("code");
+    code.textContent = token.slice(1, -1);
+    return code;
+  }
+
+  const link = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+  if (link) {
+    const href = link[2].trim();
+    // Anything else (javascript:, data:, relative) renders as plain text.
+    if (!SAFE_LINK.test(href)) return document.createTextNode(link[1]);
+    const a = document.createElement("a");
+    a.href = href;
+    a.textContent = link[1];
+    a.rel = "noopener noreferrer";
+    a.target = "_blank";
+    return a;
+  }
+
+  if (token.startsWith("**") || token.startsWith("__")) {
+    const strong = document.createElement("strong");
+    appendInline(strong, token.slice(2, -2));
+    return strong;
+  }
+
+  const em = document.createElement("em");
+  appendInline(em, token.slice(1, -1));
+  return em;
+}
+
+function appendInline(parent, text) {
+  let last = 0;
+  for (const match of text.matchAll(INLINE)) {
+    if (match.index > last) {
+      parent.append(document.createTextNode(text.slice(last, match.index)));
+    }
+    parent.append(inlineNode(match[0]));
+    last = match.index + match[0].length;
+  }
+  if (last < text.length) {
+    parent.append(document.createTextNode(text.slice(last)));
+  }
+}
+
+function renderMarkdown(container, source) {
+  container.replaceChildren();
+  const lines = source.replace(/\r\n?/g, "\n").split("\n");
+  let paragraph = [];
+  let i = 0;
+
+  const flush = () => {
+    if (paragraph.length === 0) return;
+    const p = document.createElement("p");
+    appendInline(p, paragraph.join(" "));
+    container.append(p);
+    paragraph = [];
+  };
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (!line.trim()) {
+      flush();
+      i += 1;
+      continue;
+    }
+
+    const fence = line.match(FENCE);
+    if (fence) {
+      flush();
+      const code = [];
+      i += 1;
+      while (i < lines.length && !FENCE.test(lines[i])) {
+        code.push(lines[i]);
+        i += 1;
+      }
+      i += 1; // the closing fence, which streaming may not have sent yet
+      const pre = document.createElement("pre");
+      const block = document.createElement("code");
+      if (fence[1]) block.className = `language-${fence[1]}`;
+      block.textContent = code.join("\n");
+      pre.append(block);
+      container.append(pre);
+      continue;
+    }
+
+    const heading = line.match(HEADING);
+    if (heading) {
+      flush();
+      const el = document.createElement(`h${Math.min(heading[1].length + 2, 6)}`);
+      appendInline(el, heading[2]);
+      container.append(el);
+      i += 1;
+      continue;
+    }
+
+    if (RULE.test(line)) {
+      flush();
+      container.append(document.createElement("hr"));
+      i += 1;
+      continue;
+    }
+
+    if (QUOTE.test(line)) {
+      flush();
+      const quoted = [];
+      while (i < lines.length) {
+        const match = lines[i].match(QUOTE);
+        if (!match) break;
+        quoted.push(match[1]);
+        i += 1;
+      }
+      const blockquote = document.createElement("blockquote");
+      appendInline(blockquote, quoted.join(" "));
+      container.append(blockquote);
+      continue;
+    }
+
+    if (UNORDERED.test(line)) {
+      flush();
+      const list = document.createElement("ul");
+      while (i < lines.length) {
+        const match = lines[i].match(UNORDERED);
+        if (!match) break;
+        const item = document.createElement("li");
+        appendInline(item, match[1]);
+        list.append(item);
+        i += 1;
+      }
+      container.append(list);
+      continue;
+    }
+
+    const ordered = line.match(ORDERED);
+    if (ordered) {
+      flush();
+      const list = document.createElement("ol");
+      const start = Number(ordered[1]);
+      if (start > 1) list.start = start;
+      while (i < lines.length) {
+        const match = lines[i].match(ORDERED);
+        if (!match) break;
+        const item = document.createElement("li");
+        appendInline(item, match[2]);
+        list.append(item);
+        i += 1;
+      }
+      container.append(list);
+      continue;
+    }
+
+    paragraph.push(line.trim());
+    i += 1;
+  }
+
+  flush();
+}
+
 // textContent, never innerHTML: replies are untrusted.
 function line(kind, text) {
   const article = document.createElement("article");
@@ -29,7 +204,8 @@ function line(kind, text) {
   label.textContent = LABELS[kind] || kind;
   header.append(label);
 
-  const body = document.createElement("p");
+  const body = document.createElement("div");
+  body.className = "body";
   body.textContent = text;
 
   article.append(header, body);
@@ -38,11 +214,13 @@ function line(kind, text) {
   return article;
 }
 
-// Deltas arrive as they are generated; the first one replaces the ellipsis.
+// The raw markdown per bot line; every delta re-renders from it.
+const sources = new WeakMap();
+
 function appendText(article, text) {
-  const body = article.querySelector("p");
-  if (body.textContent === "…") body.textContent = "";
-  body.textContent += text;
+  sources.set(article, (sources.get(article) ?? "") + text);
+  renderMarkdown(article.querySelector(".body"), sources.get(article));
+  article.scrollIntoView({ block: "nearest" });
 }
 
 // The API sends `event: <name>` + `data: <json>` frames, then `data: [DONE]`.
