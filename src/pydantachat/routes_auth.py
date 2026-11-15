@@ -44,7 +44,10 @@ async def auth(request: Request) -> Response:
     try:
         token = await oauth.google.authorize_access_token(request)
     except MismatchingStateError:
-        # Stale or missing session: start over rather than showing a 500.
+        # Stale or missing session (including a local test that opened the app
+        # at 127.0.0.1 while APP_BASE_URL says localhost): start over rather
+        # than showing a 500.
+        logger.warning("OAuth state mismatch; restarting sign-in")
         request.session.clear()
         return RedirectResponse("/login")
 

@@ -208,6 +208,15 @@ _REPO_CONFIG = json.loads(
 )
 
 
+def test_shipped_config_defaults_to_deepseek_at_high_thinking() -> None:
+    """Regression: the shipped default is DeepSeek flash with thinking high."""
+    config = Settings.model_validate(_REPO_CONFIG).model
+
+    assert config.model_id == "deepseek:deepseek-flash"
+    assert config.thinking == "high"
+    assert config.model_settings == {"thinking": "high"}
+
+
 @pytest.mark.parametrize(
     ("provider", "model"),
     [

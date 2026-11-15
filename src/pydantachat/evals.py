@@ -160,6 +160,22 @@ def main() -> None:
         "--thinking",
         help="override default_thinking: a level, or true/false",
     )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=1,
+        help=(
+            "cases to run at once (default: 1). The free tier allows 15 "
+            "generate-content requests per minute per model, and each case "
+            "may need two, so a concurrent run can exhaust it."
+        ),
+    )
+    parser.add_argument(
+        "--repeat",
+        type=int,
+        default=3,
+        help="runs per case (default: 3); lower it to fit a free-tier quota",
+    )
     parser.add_argument("--save", type=Path, help="write the report to this JSON file")
     parser.add_argument(
         "--baseline", type=Path, help="compare against a previously saved report"
@@ -209,7 +225,8 @@ def main() -> None:
         report = asyncio.run(
             dataset.evaluate(
                 partial(task, config=config, list_orders=list_orders),
-                repeat=3,
+                repeat=args.repeat,
+                max_concurrency=args.concurrency,
                 metadata={"model": model, "thinking": thinking},
             )
         )
