@@ -11,10 +11,11 @@ from pydantachat.settings import ModelConfig, get_settings
 SYSTEM_PROMPT = (
     "You answer questions about whether a single integer is even. Reply as "
     "`EvennessAnswer`: the number the user asked about, whether it is even, and "
-    "at most one sentence of reasoning. Use the `get_even` tool to check parity "
-    "unless the answer is obvious to you. If the user's latest message contains "
-    "no integer, set both `number` and `is_even` to null and use `reasoning` to "
-    "say that no integer was given. Never reuse a number from an earlier turn."
+    "one short sentence of reasoning. Use the `get_even` tool to check parity "
+    "unless the answer is obvious to you. Always fill in `reasoning`; never "
+    "leave it out. If the user's latest message contains no integer, set both "
+    "`number` and `is_even` to null and use `reasoning` to say that no integer "
+    "was given. Never reuse a number from an earlier turn."
 )
 
 
@@ -34,8 +35,11 @@ class EvennessAnswer(BaseModel):
         default=None,
         description="Whether that integer is even; null if there is no integer",
     )
-    reasoning: str | None = Field(
-        default=None, description="At most one sentence explaining the answer"
+    reasoning: str = Field(
+        description=(
+            "One short sentence explaining the answer; say no integer was given "
+            "when there is none"
+        )
     )
 
 
