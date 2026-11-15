@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from joserfc import jwt
 from joserfc.jwk import KeySet, RSAKey
 from pydantic_ai.exceptions import ModelHTTPError, UserError
-from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
+from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
 
@@ -62,9 +62,7 @@ def _id_token(key: RSAKey, **overrides: object) -> str:
 
 def _answering() -> FunctionModel:
     def model(_messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
-        return ModelResponse(
-            parts=[ToolCallPart("final_result", {"number": 4, "is_even": True})]
-        )
+        return ModelResponse(parts=[TextPart("You have three orders.")])
 
     return FunctionModel(model)
 
@@ -79,7 +77,9 @@ def _failing(exc: Exception) -> FunctionModel:
 def _client(api, model: FunctionModel | TestModel) -> tuple[TestClient, Sessions]:
     """A client whose auth is fixed and whose chats use a scripted model."""
     api.dependency_overrides[current_user] = lambda: User(email=ALLOWED)
-    sessions = Sessions(make_chat=lambda: Chat(agent=build_agent(model)))
+    sessions = Sessions(
+        make_chat=lambda _owner, _session: Chat(agent=build_agent(model))
+    )
     api.dependency_overrides[get_sessions] = lambda: sessions
     return TestClient(api), sessions
 
@@ -226,14 +226,14 @@ def test_garbage_is_401(
 # --- chat ------------------------------------------------------------------
 
 
-def test_chat_returns_a_typed_reply(configured: None) -> None:
+def test_chat_returns_the_answer(configured: None) -> None:
     client, sessions = _client(create_app(), _answering())
 
-    response = client.post("/api/chat", json={"message": "is 4 even?"})
+    response = client.post("/api/chat", json={"message": "what did I order?"})
 
     assert response.status_code == 200
     body = response.json()
-    assert body["reply"] == {"number": 4, "is_even": True, "reasoning": None}
+    assert body["reply"] == "You have three orders."
     assert len(sessions) == 1
 
 
@@ -287,17 +287,15 @@ def test_a_user_error_is_a_500(configured: None) -> None:
 
 
 def test_streaming_sends_sse_frames(configured: None) -> None:
-    client, _ = _client(
-        create_app(), TestModel(custom_output_args={"number": 4, "is_even": True})
-    )
+    client, _ = _client(create_app(), TestModel(custom_output_text="Three orders."))
 
-    response = client.post("/api/chat/stream", json={"message": "is 4 even?"})
+    response = client.post("/api/chat/stream", json={"message": "what did I order?"})
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
     body = response.text
     assert "event: session" in body
-    assert '"number":4' in body
+    assert '"text"' in body
     assert body.rstrip().endswith("data: [DONE]")
 
 
@@ -308,7 +306,7 @@ def test_streaming_reports_a_provider_failure(configured: None) -> None:
 
     client, _ = _client(create_app(), FunctionModel(stream_function=broken_stream))
 
-    body = client.post("/api/chat/stream", json={"message": "is 4 even?"}).text
+    body = client.post("/api/chat/stream", json={"message": "what did I order?"}).text
 
     assert "event: error" in body
     assert body.rstrip().endswith("data: [DONE]")
@@ -339,16 +337,15 @@ def test_startup_refuses_multiple_workers(
 
 
 def test_sse_frames_are_parseable(configured: None) -> None:
-    """The payload after `data:` is JSON, not a repr."""
-    client, _ = _client(
-        create_app(), TestModel(custom_output_args={"number": 4, "is_even": True})
-    )
+    """The payload after `data:` is JSON, and the deltas make up the answer."""
+    client, _ = _client(create_app(), TestModel(custom_output_text="Three orders."))
 
-    body = client.post("/api/chat/stream", json={"message": "is 4 even?"}).text
+    body = client.post("/api/chat/stream", json={"message": "what did I order?"}).text
     payloads = [
         json.loads(line[len("data: ") :])
         for line in body.splitlines()
         if line.startswith("data: ") and line != "data: [DONE]"
     ]
+    deltas = [payload["text"] for payload in payloads if "text" in payload]
 
-    assert payloads[-1]["number"] == 4
+    assert "".join(deltas) == "Three orders."

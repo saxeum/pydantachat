@@ -62,19 +62,24 @@ def wait_for(
 
 
 def sample_stream(page: Page, timeout: float = 60.0) -> tuple[list[str], str]:
-    """Collect the bot line's text while the answer streams in."""
+    """Collect the bot line's text while the answer streams in, until it settles."""
     samples: list[str] = []
+    last = ""
+    stable_since: float | None = None
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        bot = page.locator("#log article.bot")
-        final = ""
-        if bot.count():
-            final = bot.last.inner_text()
-            samples.append(final)
-            if page.locator("#log article.bot .reasoning").count():
-                return samples, final
+        bot = page.locator("#log article.bot p")
+        text = bot.last.inner_text() if bot.count() else ""
+        if text != last:
+            samples.append(text)
+            last = text
+            stable_since = None
+        elif text and text != "…":
+            stable_since = stable_since or time.monotonic()
+            if time.monotonic() - stable_since >= 0.6:
+                break
         time.sleep(0.02)
-    return samples, final if samples else ""
+    return samples, last
 
 
 def main() -> int:
@@ -134,11 +139,17 @@ def main() -> int:
         )
 
         # --- first turn ---------------------------------------------------
-        page.fill("#message", "Is 7 even?")
+        page.fill("#message", "What orders do I have?")
         page.click("button[type=submit]")
         samples, answer = sample_stream(page)
-        check("answer renders as a sentence", "7 is odd" in answer, answer[:70])
-        check("reasoning is rendered", "\n" in answer.strip(), repr(answer[:80]))
+        check(
+            "answer names an order",
+            any(
+                word in answer.lower()
+                for word in ("shipped", "processing", "delivered")
+            ),
+            answer[:80],
+        )
         # One distinct state would mean the answer appeared fully formed.
         check(
             "answer arrived in pieces",
@@ -151,13 +162,14 @@ def main() -> int:
         )
         check(
             "user message is echoed",
-            "Is 7 even?" in (page.locator("#log article.you").first.inner_text() or ""),
+            "What orders do I have?"
+            in (page.locator("#log article.you").first.inner_text() or ""),
         )
 
         # --- follow-up reuses the session ---------------------------------
-        page.fill("#message", "And 4?")
+        page.fill("#message", "What is the status of my latest order?")
         page.click("button[type=submit]")
-        ok = wait_contains(page.locator("#log article.bot"), "4 is even")
+        ok = wait_contains(page.locator("#log article.bot p"), "delivered")
         check("follow-up answers", ok)
         check(
             "follow-up sends a session id",
@@ -173,17 +185,17 @@ def main() -> int:
         page.click("#new")
         check(
             "new conversation clears the transcript",
-            page.locator("#log li").count() == 0,
+            page.locator("#log article").count() == 0,
         )
-        page.fill("#message", "Is 3 even?")
+        page.fill("#message", "What did I order in October?")
         page.click("button[type=submit]")
         check(
             "new conversation answers",
-            wait_contains(page.locator("#log article.bot"), "3 is odd"),
+            wait_contains(page.locator("#log article.bot p"), "shipped"),
         )
         check(
             "new conversation drops the session id",
-            len(sent) > 2 and sent[2].get("session_id") is None,
+            bool(sent) and sent[-1].get("session_id") is None,
         )
 
         # --- 422 from the server (no model call) --------------------------
@@ -296,7 +308,8 @@ def main() -> int:
         # --- keyboard and overlapping submits (intercepted) ----------------
         fake = (
             'event: session\ndata: {"session_id": "fake"}\n\n'
-            'data: {"number":5,"is_even":false,"reasoning":"5 is odd"}\n\n'
+            'data: {"text": "You have "}\n\n'
+            'data: {"text": "three orders."}\n\n'
             "data: [DONE]\n\n"
         )
         page.route(
@@ -316,7 +329,9 @@ def main() -> int:
         page.press("#message", "Enter")
         check(
             "enter sends",
-            wait_contains(page.locator("#log article.bot"), "5 is odd", timeout=10),
+            wait_contains(
+                page.locator("#log article.bot p"), "three orders", timeout=10
+            ),
         )
 
         page.fill("#message", "   ")
@@ -330,7 +345,7 @@ def main() -> int:
         page.click("button[type=submit]")
         page.fill("#message", "second")
         page.click("button[type=submit]")
-        wait_contains(page.locator("#log article.bot"), "5 is odd", timeout=10)
+        wait_contains(page.locator("#log article.bot p"), "three orders", timeout=10)
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline and (
             page.locator("#log article.bot").count() < bots_before + 3

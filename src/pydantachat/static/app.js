@@ -38,23 +38,11 @@ function line(kind, text) {
   return article;
 }
 
-function renderAnswer(article, answer) {
+// Deltas arrive as they are generated; the first one replaces the ellipsis.
+function appendText(article, text) {
   const body = article.querySelector("p");
-  if (typeof answer.number !== "number" || typeof answer.is_even !== "boolean") {
-    body.textContent = "…";
-    return;
-  }
-  body.textContent = `${answer.number} is ${answer.is_even ? "even" : "odd"}.`;
-
-  let reasoning = article.querySelector(".reasoning");
-  if (answer.reasoning) {
-    if (!reasoning) {
-      reasoning = document.createElement("small");
-      reasoning.className = "reasoning";
-      article.append(reasoning);
-    }
-    reasoning.textContent = answer.reasoning;
-  }
+  if (body.textContent === "…") body.textContent = "";
+  body.textContent += text;
 }
 
 // The API sends `event: <name>` + `data: <json>` frames, then `data: [DONE]`.
@@ -77,7 +65,7 @@ function consume(buffer, article) {
     } else if (event === "error") {
       line("system", "the provider failed; try again");
     } else if (payload !== "[DONE]") {
-      renderAnswer(article, JSON.parse(payload));
+      appendText(article, JSON.parse(payload).text ?? "");
     }
   }
   return rest;

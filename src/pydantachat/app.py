@@ -4,12 +4,16 @@ import os
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from functools import partial
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.staticfiles import StaticFiles
 
-from pydantachat import pages, routes_auth, routes_chat, routes_ops
+from pydantachat import pages, routes_auth, routes_chat, routes_ops, routes_orders
+from pydantachat.agent import Chat, build_agent
+from pydantachat.db import Database
+from pydantachat.orders_client import HttpOrdersClient
 from pydantachat.sessions import Sessions
 from pydantachat.settings import ConfigError, get_auth, get_settings
 
@@ -29,14 +33,42 @@ SECURITY_HEADERS = {
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Fail fast: a process without configuration should die, not serve 500s."""
     try:
-        get_settings()
-        get_auth()
+        settings = get_settings()
+        auth = get_auth()
     except (ConfigError, ValueError) as exc:
         raise RuntimeError(f"refusing to start: {exc}") from exc
 
     _require_single_worker()
-    app.state.sessions = Sessions()
+
+    db = Database(settings.db_path)
+    db.seed(auth.allowed_emails)
+    app.state.db = db
+    app.state.sessions = Sessions(
+        make_chat=partial(
+            _make_chat, db=db, base_url=auth.app_base_url, secret=auth.session_secret
+        )
+    )
     yield
+
+
+def _make_chat(
+    owner: str, session_id: str, *, db: Database, base_url: str, secret: str
+) -> Chat:
+    """Build the chat for one owner, bound to that customer's orders.
+
+    An allowlisted email with no customer row fails closed here, before a turn
+    starts, rather than returning an empty list.
+    """
+    customer = db.customer_for_email(owner)
+    if customer is None:
+        raise HTTPException(status_code=403, detail="this account is not allowed")
+    client = HttpOrdersClient(
+        base_url=base_url,
+        secret=secret,
+        customer_id=customer.id,
+        session_id=session_id,
+    )
+    return Chat(agent=build_agent(list_orders=client.list_orders))
 
 
 def _require_single_worker() -> None:
@@ -83,6 +115,7 @@ def create_app() -> FastAPI:
     app.include_router(routes_ops.router)
     app.include_router(routes_auth.router)
     app.include_router(routes_chat.router)
+    app.include_router(routes_orders.router)
     app.mount("/static", StaticFiles(directory=pages.STATIC_DIR), name="static")
     app.include_router(pages.router)
     return app

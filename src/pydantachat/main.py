@@ -1,4 +1,4 @@
-"""Interactive CLI: one turn per line, answers printed as JSON."""
+"""Interactive CLI: one turn per line, answers printed as text."""
 
 import asyncio
 import logging
@@ -6,11 +6,13 @@ import os
 
 from pydantic_ai.exceptions import AgentRunError, ModelHTTPError, UserError
 
-from pydantachat.agent import Chat
-from pydantachat.settings import ConfigError, get_settings
+from pydantachat.agent import Chat, build_agent
+from pydantachat.db import Database
+from pydantachat.settings import ConfigError, Settings, get_settings
 from pydantachat.telemetry import setup_telemetry
 
 EXIT_COMMANDS = {"exit", "quit"}
+DEV_EMAIL = "dev@localhost"
 
 # Statuses where the credentials or the configuration are wrong, so repeating
 # the same request cannot help.
@@ -23,6 +25,25 @@ def _is_fatal(exc: Exception) -> bool:
     if isinstance(exc, UserError):
         return True
     return isinstance(exc, ModelHTTPError) and exc.status_code in FATAL_STATUS
+
+
+def make_chat(settings: Settings) -> Chat:
+    """The CLI is single-tenant: it acts for a local demo customer.
+
+    The web app mints a scoped orders token and calls the API over HTTP. A local
+    CLI has no browser session and no second tenant, so it reads the same SQLite
+    file directly; the authorization path is covered by the API tests.
+    """
+    db = Database(settings.db_path)
+    db.seed([DEV_EMAIL])
+    customer = db.customer_for_email(DEV_EMAIL)
+    if customer is None:  # pragma: no cover - seeded immediately above
+        raise UserError(f"could not seed {DEV_EMAIL}")
+
+    async def list_orders() -> list[dict[str, str]]:
+        return [order.as_dict() for order in db.orders_for(customer.id)]
+
+    return Chat(agent=build_agent(list_orders=list_orders))
 
 
 async def _turn(chat: Chat, line: str, key_env: str) -> None:
@@ -46,13 +67,13 @@ async def _turn(chat: Chat, line: str, key_env: str) -> None:
             logger.error("turn failed: %s", exc)
             return
         raise
-    print(answer.model_dump_json(indent=2))
+    print(answer)
 
 
 async def run() -> None:
     try:
         settings = get_settings()
-        chat = Chat()
+        chat = make_chat(settings)
     except (UserError, ConfigError) as exc:
         # Missing key, unknown provider, unreadable config: nothing to retry.
         logger.error("%s", exc)
