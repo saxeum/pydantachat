@@ -23,7 +23,7 @@ SYSTEM_PROMPT = (
     "so. You can only see this customer's orders: if asked about another "
     "customer, say you cannot access them. When you state how many orders there "
     "are, use the tool's count field rather than counting the rows yourself. "
-    "Answer in one or two short sentences."
+    "Answer in one or two short sentences. Display order data in markdown if possible."
 )
 
 
