@@ -118,7 +118,8 @@ header p {
 #log .body ul,
 #log .body ol,
 #log .body pre,
-#log .body blockquote {
+#log .body blockquote,
+#log .body table {
   margin: 0 0 0.55rem;
 }
 
@@ -166,6 +167,25 @@ header p {
   padding-left: 0.7rem;
   border-left: 2px solid var(--border);
   color: var(--muted-foreground);
+}
+
+#log .body table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+#log .body th,
+#log .body td {
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+#log .body th {
+  background: var(--muted);
+  font-weight: 600;
 }
 
 #log .body a {

@@ -80,6 +80,21 @@ function appendInline(parent, text) {
   }
 }
 
+// Tables are common for order lists. Keep the parser aligned with the inline
+// format above: cells go through textContent, never innerHTML.
+function tableCells(line) {
+  let text = line.trim();
+  if (text.startsWith("|")) text = text.slice(1);
+  if (text.endsWith("|")) text = text.slice(0, -1);
+  return text.split("|").map((cell) => cell.trim());
+}
+
+function isTableDivider(line) {
+  if (!line.includes("|")) return false;
+  const cells = tableCells(line);
+  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
 function renderMarkdown(container, source) {
   container.replaceChildren();
   const lines = source.replace(/\r\n?/g, "\n").split("\n");
@@ -184,6 +199,38 @@ function renderMarkdown(container, source) {
         i += 1;
       }
       container.append(list);
+      continue;
+    }
+
+    if (line.includes("|") && isTableDivider(lines[i + 1] ?? "")) {
+      flush();
+      const headers = tableCells(line);
+      const table = document.createElement("table");
+      const headRow = document.createElement("tr");
+      for (const cell of headers) {
+        const th = document.createElement("th");
+        appendInline(th, cell);
+        headRow.append(th);
+      }
+      const thead = document.createElement("thead");
+      thead.append(headRow);
+      table.append(thead);
+      i += 2; // header and divider
+
+      const tbody = document.createElement("tbody");
+      while (i < lines.length && lines[i].trim() && lines[i].includes("|")) {
+        const cells = tableCells(lines[i]);
+        const row = document.createElement("tr");
+        for (let column = 0; column < headers.length; column += 1) {
+          const td = document.createElement("td");
+          appendInline(td, cells[column] ?? "");
+          row.append(td);
+        }
+        tbody.append(row);
+        i += 1;
+      }
+      if (tbody.children.length > 0) table.append(tbody);
+      container.append(table);
       continue;
     }
 
