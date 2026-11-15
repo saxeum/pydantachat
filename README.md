@@ -32,6 +32,18 @@ The CLI prints that JSON. `Chat.send` returns the model; `Chat.send_stream`
 yields **partial models** as the schema fills in — once the output is typed there
 are no text deltas to stream.
 
+The schema can also say there was nothing to answer. When the message contains
+no integer, both fields are null rather than a number borrowed from an earlier
+turn:
+
+```json
+{
+  "number": null,
+  "is_even": null,
+  "reasoning": "No integer was given."
+}
+```
+
 Structured output and thinking interact on DeepSeek. While thinking is on,
 DeepSeek rejects a forced tool choice, so Pydantic AI sends `tool_choice='auto'`
 and the model is free to answer in prose instead of calling the output tool; the

@@ -38,13 +38,18 @@ function line(kind, text) {
   return article;
 }
 
+// The latest partial per bot line, so `[DONE]` can tell a finished "no answer"
+// apart from an answer that has simply not started streaming yet.
+const answers = new WeakMap();
+
 function renderAnswer(article, answer) {
+  answers.set(article, answer);
+
   const body = article.querySelector("p");
-  if (typeof answer.number !== "number" || typeof answer.is_even !== "boolean") {
-    body.textContent = "…";
-    return;
-  }
-  body.textContent = `${answer.number} is ${answer.is_even ? "even" : "odd"}.`;
+  body.textContent =
+    typeof answer.number === "number" && typeof answer.is_even === "boolean"
+      ? `${answer.number} is ${answer.is_even ? "even" : "odd"}.`
+      : "…";
 
   let reasoning = article.querySelector(".reasoning");
   if (answer.reasoning) {
@@ -54,6 +59,15 @@ function renderAnswer(article, answer) {
       article.append(reasoning);
     }
     reasoning.textContent = answer.reasoning;
+  }
+}
+
+// The stream is over: a complete answer with null fields means the message had
+// no integer, so replace the ellipsis with something true.
+function settleAnswer(article) {
+  const answer = answers.get(article);
+  if (typeof answer?.number !== "number" || typeof answer?.is_even !== "boolean") {
+    article.querySelector("p").textContent = "no integer in that message";
   }
 }
 
@@ -75,8 +89,11 @@ function consume(buffer, article) {
     if (event === "session") {
       sessionId = JSON.parse(payload).session_id;
     } else if (event === "error") {
+      answers.delete(article); // a failed stream has no answer to settle
       line("system", "the provider failed; try again");
-    } else if (payload !== "[DONE]") {
+    } else if (payload === "[DONE]") {
+      if (answers.has(article)) settleAnswer(article);
+    } else {
       renderAnswer(article, JSON.parse(payload));
     }
   }

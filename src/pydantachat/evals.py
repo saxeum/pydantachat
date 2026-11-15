@@ -85,7 +85,8 @@ class AnswersEvenness(Evaluator[str, EvennessAnswer, None]):
 
 
 def _expected(number: int, is_even: bool) -> EvennessAnswer:
-    return EvennessAnswer(number=number, is_even=is_even)
+    # The evaluator compares the typed fields; the sentence is not the contract.
+    return EvennessAnswer(number=number, is_even=is_even, reasoning="")
 
 
 def _total_metric(report: EvaluationReport[Any, Any, Any], name: str) -> float | None:
@@ -134,6 +135,14 @@ dataset = Dataset[str, EvennessAnswer, None](
                     tool_name="get_even", expected_arguments={"num": 4}
                 ),
             ],
+        ),
+        Case(
+            name="no-integer",
+            # The schema must allow "nothing to answer"; a required number made
+            # the model reuse the previous one instead.
+            inputs="Tell me about your mother.",
+            expected_output=EvennessAnswer(reasoning=""),
+            evaluators=[AnswersEvenness()],
         ),
     ],
 )

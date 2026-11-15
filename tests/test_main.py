@@ -42,7 +42,12 @@ def _failing(exc: Exception) -> FunctionModel:
 def _answering() -> FunctionModel:
     def model(_messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
         return ModelResponse(
-            parts=[ToolCallPart("final_result", {"number": 4, "is_even": True})]
+            parts=[
+                ToolCallPart(
+                    "final_result",
+                    {"number": 4, "is_even": True, "reasoning": "4 is even"},
+                )
+            ]
         )
 
     return FunctionModel(model)

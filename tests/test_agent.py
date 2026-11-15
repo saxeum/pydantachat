@@ -30,10 +30,16 @@ def test_get_even_false(num: int) -> None:
     assert get_even(num) is False
 
 
-def _structured_chat(number: int = 4, is_even: bool = True) -> Chat:
+def _structured_chat(number: int | None = 4, is_even: bool | None = True) -> Chat:
     return Chat(
         agent=build_agent(
-            TestModel(custom_output_args={"number": number, "is_even": is_even})
+            TestModel(
+                custom_output_args={
+                    "number": number,
+                    "is_even": is_even,
+                    "reasoning": "test sentence",
+                }
+            )
         )
     )
 
@@ -46,6 +52,25 @@ async def test_send_returns_the_output_model() -> None:
     assert answer.number == 4
     assert answer.is_even is True
     assert chat.history
+
+
+async def test_a_message_with_no_integer_answers_null() -> None:
+    """The schema can say "nothing to answer" instead of reusing a number."""
+    chat = _structured_chat(number=None, is_even=None)
+
+    answer = await chat.send("tell me about your mother")
+
+    assert answer.number is None
+    assert answer.is_even is None
+
+
+async def test_send_stream_ends_with_null_for_a_message_with_no_integer() -> None:
+    chat = _structured_chat(number=None, is_even=None)
+
+    partials = [partial async for partial in chat.send_stream("hello there")]
+
+    assert partials[-1].number is None
+    assert partials[-1].is_even is None
 
 
 async def test_send_stream_yields_partials_ending_complete() -> None:
@@ -76,10 +101,19 @@ async def test_invalid_output_is_retried() -> None:
     def flaky(messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
         calls.append(len(messages))
         if len(calls) == 1:
-            # `is_even` is required, so this fails validation and must be retried.
-            return ModelResponse(parts=[ToolCallPart("final_result", {"number": 4})])
+            # A string is not an int, so this fails validation and must be retried.
+            return ModelResponse(
+                parts=[
+                    ToolCallPart("final_result", {"number": "four", "is_even": True})
+                ]
+            )
         return ModelResponse(
-            parts=[ToolCallPart("final_result", {"number": 4, "is_even": True})]
+            parts=[
+                ToolCallPart(
+                    "final_result",
+                    {"number": 4, "is_even": True, "reasoning": "4 is even"},
+                )
+            ]
         )
 
     chat = Chat(agent=build_agent(FunctionModel(flaky)))
@@ -90,6 +124,25 @@ async def test_invalid_output_is_retried() -> None:
     assert len(calls) == 2
 
 
+async def test_a_missing_sentence_is_rejected_and_retried() -> None:
+    """`reasoning` is required, so a terse answer is not a valid one."""
+    calls: list[int] = []
+
+    def terse(messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
+        calls.append(len(messages))
+        args: dict[str, object] = {"number": 4, "is_even": True}
+        if len(calls) > 1:
+            args["reasoning"] = "4 is even"
+        return ModelResponse(parts=[ToolCallPart("final_result", args)])
+
+    chat = Chat(agent=build_agent(FunctionModel(terse)))
+
+    answer = await chat.send("is 4 even?")
+
+    assert answer.reasoning == "4 is even"
+    assert len(calls) == 2
+
+
 async def test_send_reuses_history() -> None:
     message_counts: list[int] = []
 
@@ -97,7 +150,16 @@ async def test_send_reuses_history() -> None:
         message_counts.append(len(messages))
         turn = len(message_counts)
         return ModelResponse(
-            parts=[ToolCallPart("final_result", {"number": turn, "is_even": True})]
+            parts=[
+                ToolCallPart(
+                    "final_result",
+                    {
+                        "number": turn,
+                        "is_even": True,
+                        "reasoning": "a test sentence",
+                    },
+                )
+            ]
         )
 
     chat = Chat(agent=build_agent(FunctionModel(model)))
@@ -168,7 +230,16 @@ async def test_concurrent_sends_serialise_and_keep_both_turns() -> None:
         # Let the other send run while this one is in flight.
         await asyncio.sleep(0.01)
         return ModelResponse(
-            parts=[ToolCallPart("final_result", {"number": len(seen), "is_even": True})]
+            parts=[
+                ToolCallPart(
+                    "final_result",
+                    {
+                        "number": len(seen),
+                        "is_even": True,
+                        "reasoning": "a test sentence",
+                    },
+                )
+            ]
         )
 
     chat = Chat(agent=build_agent(FunctionModel(model)))
