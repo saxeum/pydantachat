@@ -48,10 +48,15 @@ Everything except secrets lives in `config.json`:
 - `thinking.levels` — the effort levels that model accepts. Pydantic AI maps an
   unsupported level to the nearest accepted one, so declaring only the real
   range is what keeps a silent downgrade from being recorded as a measurement.
-- `thinking.can_disable` — whether turning thinking off is honest for that
-  model. Plenty of models always reason (`deepseek-flash`, `gpt-5-nano`); for
-  those, `thinking=False` makes Pydantic AI send the lowest effort instead, so
-  the app refuses the request rather than log an "off" run that wasn't.
+- `thinking.can_disable` — whether "off" is a real state for that model.
+  `deepseek-flash` thinks *by default* but can be turned off, which is the
+  distinction this field records; `gpt-5-nano` accepts only
+  `minimal`/`low`/`medium`/`high` and has no `none`, so `thinking=False` makes
+  Pydantic AI send `minimal` instead. Claiming "off" there would log a run that
+  was still thinking, so the request is refused. Pydantic AI translates
+  `thinking=False` into whatever the provider uses to stop reasoning:
+  `reasoning_effort='none'`, an Anthropic-style `reasoning: {"effort": "none"}`,
+  or `{"thinking": {"type": "disabled"}}`.
 - `default_thinking` is the default for the **default model**; any other model
   sends no thinking setting unless `--thinking` asks for one, rather than
   inheriting a level that model may not support.

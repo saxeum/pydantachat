@@ -11,6 +11,7 @@ from pydantic_ai.messages import (
     ToolCallPart,
     ToolReturnPart,
 )
+from pydantic_ai.models import infer_model
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
 
@@ -228,6 +229,38 @@ def test_thinking_label() -> None:
     assert thinking_label(True) == "enabled"
     assert thinking_label(False) == "disabled"
     assert thinking_label("high") == "high"
+
+
+_REPO_CONFIG = json.loads(
+    (Path(__file__).resolve().parents[1] / "config.json").read_text()
+)
+
+
+@pytest.mark.parametrize(
+    ("provider", "model"),
+    [
+        (provider, model)
+        for provider, provider_config in _REPO_CONFIG["providers"].items()
+        for model in provider_config["models"]
+    ],
+)
+def test_shipped_config_matches_the_model_thinking_profile(
+    provider: str, model: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`can_disable` is a claim about the model; keep it honest.
+
+    pydantic-ai treats `thinking=False` on a model that always reasons as
+    "use the lowest effort", so a wrong claim here would let an "off" run be
+    recorded while the model was still thinking.
+    """
+    monkeypatch.setenv(f"{provider.upper().replace('-', '_')}_API_KEY", "test-key")
+
+    profile = infer_model(f"{provider}:{model}").profile or {}
+    declared = _REPO_CONFIG["providers"][provider]["models"][model].get("thinking", {})
+
+    assert declared.get("can_disable", False) is not profile.get(
+        "thinking_always_enabled", False
+    )
 
 
 async def test_send() -> None:
