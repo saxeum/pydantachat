@@ -76,8 +76,8 @@ three can sit there at once.
 ## Tests
 
 ```bash
-uv run pytest          # offline: TestModel/FunctionModel only
-uv run pytest -m live  # opt-in smoke tests against the real provider API
+make test        # or: uv run pytest          -- offline, TestModel/FunctionModel only
+make test-live   # or: uv run pytest -m live  -- hits the real provider API
 ```
 
 The live suite is skipped unless the default provider's API key is set (in the
