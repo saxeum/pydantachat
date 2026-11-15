@@ -11,11 +11,15 @@ Secrets are API keys and nothing else, read from the environment (`.env`) under
 the names Pydantic AI itself uses, i.e. `<PROVIDER>_API_KEY`.
 """
 
+import ipaddress
 import json
 import os
+import secrets
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
+from typing import Literal
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, ValidationError, model_validator
@@ -26,6 +30,22 @@ from pydantic_ai.settings import ModelSettings, ThinkingLevel
 load_dotenv()
 
 DEFAULT_CONFIG_PATH = Path("config.json")
+
+# The identity the web app uses in local mode, where there is no sign-in.
+LOCAL_EMAIL = "local@localhost"
+
+
+def is_loopback_host(host: str | None) -> bool:
+    """True for `localhost` or a loopback IP literal."""
+    if not host:
+        return False
+    host = host.rstrip(".").lower()
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 class ConfigError(ValueError):
@@ -208,14 +228,23 @@ def get_settings() -> Settings:
 
 @dataclass(frozen=True)
 class AuthConfig:
-    """Google OIDC and session settings. All of it is secret or deployment
-    specific, so it comes from the environment, never from `config.json`."""
+    """Authentication settings, from the environment rather than `config.json`.
+
+    `google` mode is Google OIDC and requires every field. `local` mode is a
+    single-user, loopback-only app with no sign-in; it still refuses a public
+    `APP_BASE_URL`, so it cannot silently become an open deployment.
+    """
 
     google_client_id: str
     google_client_secret: str
     session_secret: str
     allowed_emails: frozenset[str]
     app_base_url: str
+    mode: Literal["google", "local"] = "google"
+
+    @property
+    def local(self) -> bool:
+        return self.mode == "local"
 
     @property
     def https(self) -> bool:
@@ -235,6 +264,27 @@ class AuthConfig:
 
     @classmethod
     def from_env(cls) -> AuthConfig:
+        mode = os.getenv("AUTH_MODE", "google").strip().lower()
+        app_base_url = os.getenv("APP_BASE_URL", "http://localhost:8000").rstrip("/")
+
+        if mode == "local":
+            if not is_loopback_host(urlparse(app_base_url).hostname):
+                raise ConfigError(
+                    "AUTH_MODE=local is loopback-only; point APP_BASE_URL at a "
+                    "localhost address. Use AUTH_MODE=google to serve the API."
+                )
+            return cls(
+                google_client_id="",
+                google_client_secret="",
+                session_secret=os.getenv("SESSION_SECRET", "").strip()
+                or secrets.token_urlsafe(32),
+                allowed_emails=frozenset({LOCAL_EMAIL}),
+                app_base_url=app_base_url,
+                mode="local",
+            )
+        if mode != "google":
+            raise ConfigError("AUTH_MODE must be 'google' or 'local'.")
+
         required = {
             name: os.getenv(name, "").strip()
             for name in (
@@ -264,7 +314,8 @@ class AuthConfig:
             google_client_secret=required["GOOGLE_CLIENT_SECRET"],
             session_secret=required["SESSION_SECRET"],
             allowed_emails=emails,
-            app_base_url=os.getenv("APP_BASE_URL", "http://localhost:8000").rstrip("/"),
+            app_base_url=app_base_url,
+            mode="google",
         )
 
 

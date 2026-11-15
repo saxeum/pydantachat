@@ -45,6 +45,9 @@ Open <http://localhost:8000>: sign in with an allowlisted Google account and
 chat. The page is public and asks `/api/me` who is signed in; everything under
 `/api` requires credentials.
 
+For local use without Google sign-in, run `make dev-local` instead (see
+[Local mode](#local-mode-no-sign-in)).
+
 The styling uses the design tokens from numbat's web app
 (`apps/web/src/styles/globals.css`): grey canvas, hairline borders, one indigo
 accent, Geist for UI. `theme.css` holds the tokens verbatim (same variable names)
@@ -61,7 +64,7 @@ The same agent over HTTP, with two entry points over `Chat.send` and
 | `POST /api/chat/stream` | the same answer as server-sent events, one `{"text": ...}` delta per `data:` frame, ending with `data: [DONE]` |
 | `GET /api/orders` | the token customer's orders (orders token only) |
 | `GET /api/customers/{id}/orders` | the same data, 403 unless `id` is the token's customer |
-| `GET /api/me` | `{email, name, mode}` — `mode` is `cookie` or `bearer` |
+| `GET /api/me` | `{email, name, mode}` — `mode` is `cookie`, `bearer` or `local` |
 | `GET /health` | liveness; touches no configuration |
 | `GET /ready` | 503 until the config and the provider key are present |
 
@@ -70,15 +73,36 @@ and a missing `session_id` starts a new conversation. Sessions are in-process,
 so the app runs a single worker and says so if `UVICORN_WORKERS`/`WEB_CONCURRENCY`
 asks for more (see #34 for the shared-store follow-up).
 
-Replies are rendered as markdown: headings, lists, bold/italic, inline code and
-fenced blocks, quotes and links. `app.js` builds DOM nodes from text rather than
-`innerHTML`, and only `http(s)` links become anchors, so a reply (or a
-prompt-injected tool result) cannot inject markup. That keeps the page on
+Replies are rendered as markdown: headings, lists, bold/italic, inline code,
+fenced blocks, quotes, links and tables. `app.js` builds DOM nodes from text
+rather than `innerHTML`, and only `http(s)` links become anchors, so a reply (or
+a prompt-injected tool result) cannot inject markup. That keeps the page on
 `default-src 'self'` with no parser or sanitizer dependency.
+
+### Local mode (no sign-in)
+
+Set `AUTH_MODE=local` (or run `make dev-local`) to use the web app on your own
+machine without a Google client. Every request is signed in as
+`local@localhost`; the provider key still comes from `.env` and never reaches
+the browser.
+
+Local mode is deliberately constrained:
+
+- `APP_BASE_URL` must resolve to loopback (`localhost`, `127.0.0.1`, `::1`), or
+  startup refuses.
+- Requests whose `Host` or client address is not loopback get `403`, so binding
+  the server to `0.0.0.0` or putting it behind a proxy does not turn it into an
+  open service.
+- The same-origin check still applies to writes, so a page on another site
+  cannot spend your provider key through the browser. It uses the loopback
+  origin you actually opened, so `localhost` and `127.0.0.1` both work.
+- It logs a warning at startup. Do not expose this mode on the network; deployed
+  instances should keep the default `AUTH_MODE=google`.
 
 ### Auth
 
-Google OIDC, two credential types resolving to one identity:
+In the default `google` mode, Google OIDC with two credential types resolving to
+one identity:
 
 - **Cookie session** for the browser: `GET /login` → Google → `GET /auth` sets an
   HttpOnly cookie and redirects to `/`; `GET /logout` clears it. Writes must be
@@ -88,15 +112,15 @@ Google OIDC, two credential types resolving to one identity:
   Google's keys. `GET /login?format=json` returns the ID token as JSON at the end
   of the same flow, for hand-testing.
 
-`ALLOWED_EMAILS` is required and **fails closed** — an empty list refuses to
-start rather than admitting any Google account. `GOOGLE_CLIENT_ID`,
-`GOOGLE_CLIENT_SECRET`, `SESSION_SECRET`, `ALLOWED_EMAILS` and `APP_BASE_URL`
-come from `.env`; register `<APP_BASE_URL>/auth` as a redirect URI on the shared
-Google client.
+`ALLOWED_EMAILS` is required in `google` mode and **fails closed** — an empty
+list refuses to start rather than admitting any Google account.
+`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET`, `ALLOWED_EMAILS`
+and `APP_BASE_URL` come from `.env`; register `<APP_BASE_URL>/auth` as a
+redirect URI on the shared Google client.
 
-For local testing, open the app at exactly `APP_BASE_URL` — for the default,
-<http://localhost:8000>, not `127.0.0.1`. OAuth state is a cookie scoped to the
-origin that started the flow, while Google always redirects to
+In `google` mode, for local testing open the app at exactly `APP_BASE_URL` — for
+the default, <http://localhost:8000>, not `127.0.0.1`. OAuth state is a cookie
+scoped to the origin that started the flow, while Google always redirects to
 `APP_BASE_URL/auth`; opening the app by another name makes the first callback
 miss the cookie and ask you to pick an account twice.
 
