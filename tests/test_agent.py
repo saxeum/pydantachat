@@ -1,9 +1,8 @@
 import pytest
-from pydantic_ai import Agent, models
+from pydantic_ai import models
 from pydantic_ai.messages import (
     ModelMessage,
     ModelResponse,
-    TextPart,
     ToolCallPart,
     ToolReturnPart,
 )
@@ -29,42 +28,64 @@ def test_get_even_false(num: int) -> None:
     assert get_even(num) is False
 
 
-async def test_send() -> None:
-    chat = Chat(agent=Agent(TestModel(custom_output_text="hello")))
+def _structured_chat(number: int = 4, is_even: bool = True) -> Chat:
+    return Chat(
+        agent=build_agent(
+            TestModel(custom_output_args={"number": number, "is_even": is_even})
+        )
+    )
 
-    output = await chat.send("hello there")
 
-    assert output == "hello"
-    assert len(chat.history) == 2
+async def test_send_returns_the_output_model() -> None:
+    chat = _structured_chat()
+
+    answer = await chat.send("is 4 even?")
+
+    assert answer.number == 4
+    assert answer.is_even is True
+    assert chat.history
 
 
-async def test_send_stream() -> None:
-    async def fake_stream(_messages, _info: AgentInfo):
-        for chunk in ["Hel", "lo ", "world"]:
-            yield chunk
+async def test_send_stream_yields_partials_ending_complete() -> None:
+    chat = _structured_chat()
 
-    chat = Chat(agent=Agent(FunctionModel(stream_function=fake_stream)))
+    partials = [partial async for partial in chat.send_stream("is 4 even?")]
 
-    chunks = [chunk async for chunk in chat.send_stream("hi")]
-
-    assert chunks == ["Hel", "lo ", "world"]
-    assert len(chat.history) == 2
+    assert partials
+    assert partials[-1].number == 4
+    assert partials[-1].is_even is True
+    assert chat.history
 
 
 async def test_send_stream_stops_early_records_history() -> None:
-    async def fake_stream(_messages, _info: AgentInfo):
-        yield "one"
-        yield "two"
+    chat = _structured_chat()
 
-    chat = Chat(agent=Agent(FunctionModel(stream_function=fake_stream)))
-
-    stream = chat.send_stream("hi")
-    async for chunk in stream:
-        assert chunk == "one"
+    stream = chat.send_stream("is 4 even?")
+    async for _partial in stream:
         break
     await stream.aclose()
 
     assert chat.history  # partial/interrupted turn is kept
+
+
+async def test_invalid_output_is_retried() -> None:
+    calls: list[int] = []
+
+    def flaky(messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
+        calls.append(len(messages))
+        if len(calls) == 1:
+            # `is_even` is required, so this fails validation and must be retried.
+            return ModelResponse(parts=[ToolCallPart("final_result", {"number": 4})])
+        return ModelResponse(
+            parts=[ToolCallPart("final_result", {"number": 4, "is_even": True})]
+        )
+
+    chat = Chat(agent=build_agent(FunctionModel(flaky)))
+
+    answer = await chat.send("is 4 even?")
+
+    assert answer.is_even is True
+    assert len(calls) == 2
 
 
 async def test_send_reuses_history() -> None:
@@ -72,13 +93,17 @@ async def test_send_reuses_history() -> None:
 
     def model(messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
         message_counts.append(len(messages))
-        return ModelResponse(parts=[TextPart(f"turn {len(message_counts)}")])
+        turn = len(message_counts)
+        return ModelResponse(
+            parts=[ToolCallPart("final_result", {"number": turn, "is_even": True})]
+        )
 
-    chat = Chat(agent=Agent(FunctionModel(model)))
+    chat = Chat(agent=build_agent(FunctionModel(model)))
 
-    assert await chat.send("one") == "turn 1"
-    assert await chat.send("two") == "turn 2"
+    first = await chat.send("one")
+    second = await chat.send("two")
 
+    assert (first.number, second.number) == (1, 2)
     assert len(message_counts) == 2
     assert message_counts[1] > message_counts[0]
     assert len(chat.history) > 2
@@ -93,16 +118,24 @@ def _asks_even_of_three(
         for part in getattr(message, "parts", [])
     )
     if already_called:
-        return ModelResponse(parts=[TextPart("3 is odd")])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    "final_result",
+                    {"number": 3, "is_even": False, "reasoning": "3 is odd"},
+                )
+            ]
+        )
     return ModelResponse(parts=[ToolCallPart("get_even", {"num": 3})])
 
 
 async def test_build_agent_registers_and_runs_even_tool() -> None:
     chat = Chat(agent=build_agent(FunctionModel(_asks_even_of_three)))
 
-    output = await chat.send("Is 3 even?")
+    answer = await chat.send("Is 3 even?")
 
-    assert output == "3 is odd"
+    assert answer.number == 3
+    assert answer.is_even is False
     tool_calls = [
         part
         for message in chat.history
@@ -117,7 +150,9 @@ async def test_build_agent_registers_and_runs_even_tool() -> None:
         if isinstance(part, ToolReturnPart)
     ]
 
-    assert [call.tool_name for call in tool_calls] == ["get_even"]
+    assert [call.tool_name for call in tool_calls] == ["get_even", "final_result"]
     assert tool_calls[0].args == {"num": 3}
-    assert len(tool_returns) == 1
-    assert tool_returns[0].content is False
+    # The output tool also leaves a return part, so pick get_even's out.
+    tool_outputs = [part for part in tool_returns if part.tool_name == "get_even"]
+    assert len(tool_outputs) == 1
+    assert tool_outputs[0].content is False

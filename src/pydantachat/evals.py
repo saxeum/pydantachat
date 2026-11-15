@@ -8,6 +8,7 @@ nondeterminism; treat the report as a measurement, not a pass/fail gate.
 """
 
 import argparse
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import Any, cast
@@ -17,13 +18,15 @@ from pydantic_ai.settings import ThinkingLevel
 from pydantic_evals import Case, Dataset
 from pydantic_evals.evaluators import (
     ArgumentCorrectness,
-    Contains,
+    EvaluationReason,
+    Evaluator,
+    EvaluatorContext,
     MaxToolCalls,
     ToolCorrectness,
 )
 from pydantic_evals.reporting import EvaluationReport, EvaluationReportAdapter
 
-from pydantachat.agent import build_agent
+from pydantachat.agent import EvennessAnswer, build_agent
 from pydantachat.settings import (
     ConfigError,
     ModelConfig,
@@ -54,8 +57,35 @@ def _instrument() -> None:
     Agent.instrument_all()
 
 
-def task(prompt: str, config: ModelConfig) -> str:
+def task(prompt: str, config: ModelConfig) -> EvennessAnswer:
     return build_agent(config=config).run_sync(prompt).output
+
+
+@dataclass
+class AnswersEvenness(Evaluator[str, EvennessAnswer, None]):
+    """Compare the typed fields; wording is not the contract any more."""
+
+    def evaluate(
+        self, ctx: EvaluatorContext[str, EvennessAnswer, None]
+    ) -> EvaluationReason:
+        expected = ctx.expected_output
+        if expected is None:
+            return EvaluationReason(value=False, reason="case has no expected output")
+        matched = (
+            ctx.output.number == expected.number
+            and ctx.output.is_even == expected.is_even
+        )
+        return EvaluationReason(
+            value=matched,
+            reason=(
+                f"got number={ctx.output.number} is_even={ctx.output.is_even}, "
+                f"wanted number={expected.number} is_even={expected.is_even}"
+            ),
+        )
+
+
+def _expected(number: int, is_even: bool) -> EvennessAnswer:
+    return EvennessAnswer(number=number, is_even=is_even)
 
 
 def _total_metric(report: EvaluationReport[Any, Any, Any], name: str) -> float | None:
@@ -69,39 +99,36 @@ def _total_cost(report: EvaluationReport[Any, Any, Any]) -> float | None:
     return _total_metric(report, "cost")
 
 
-dataset = Dataset[str, str, None](
+dataset = Dataset[str, EvennessAnswer, None](
     name="pydantachat-evenness",
     cases=[
         Case(
             name="four",
-            inputs="Is 4 even? Answer with one word: yes or no.",
-            expected_output="yes",
-            evaluators=[Contains("yes", case_sensitive=False)],
+            inputs="Is 4 even?",
+            expected_output=_expected(4, True),
+            evaluators=[AnswersEvenness()],
         ),
         Case(
             name="seven",
-            inputs="Is 7 even? Answer with one word: yes or no.",
-            expected_output="no",
-            evaluators=[Contains("no", case_sensitive=False)],
+            inputs="Is 7 even?",
+            expected_output=_expected(7, False),
+            evaluators=[AnswersEvenness()],
         ),
         Case(
             name="no-tool-needed",
-            inputs="What is the capital of France? Answer with one word.",
-            expected_output="Paris",
-            evaluators=[
-                Contains("Paris", case_sensitive=False),
-                MaxToolCalls(max_calls=0),
-            ],
+            inputs="Is 3 even? Answer directly, without calling any tool.",
+            expected_output=_expected(3, False),
+            evaluators=[AnswersEvenness(), MaxToolCalls(max_calls=0)],
         ),
         Case(
             name="four-with-tool",
             inputs=(
-                "Use the get_even tool with num=4, then answer with one word: "
-                "yes or no. You must call the tool before answering."
+                "Use the get_even tool with num=4, then answer. You must call the "
+                "tool before answering."
             ),
-            expected_output="yes",
+            expected_output=_expected(4, True),
             evaluators=[
-                Contains("yes", case_sensitive=False),
+                AnswersEvenness(),
                 ToolCorrectness(expected_tools=["get_even"]),
                 ArgumentCorrectness(
                     tool_name="get_even", expected_arguments={"num": 4}
