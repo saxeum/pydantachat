@@ -1,44 +1,65 @@
-"""Runtime configuration loaded from `.env` or the environment."""
+"""Application configuration.
 
+Everything except secrets lives in `config.json`:
+
+- `default_provider` / `default_model` / `default_thinking` — what to run.
+- `providers.<name>.models` — the models that may be requested.
+- `providers.<name>.thinking_levels` — the thinking levels that may be
+  requested from that provider.
+- `tracing.endpoint` / `tracing.service_name` — where spans are exported.
+
+Secrets are API keys and nothing else, and they only ever come from the
+environment (`.env`) under the same names Pydantic AI itself reads:
+`DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, i.e.
+`<PROVIDER>_API_KEY` for whatever provider is selected.
+"""
+
+import json
 import os
 from dataclasses import dataclass
+from functools import cache
+from pathlib import Path
 from typing import cast
 
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field, ValidationError, model_validator
 from pydantic_ai.settings import ModelSettings, ThinkingLevel
 
 load_dotenv()
 
-_THINKING_LEVELS = {"minimal", "low", "medium", "high", "xhigh", "max"}
+DEFAULT_CONFIG_PATH = Path("config.json")
+
+# The unified pydantic-ai setting: an effort level, or True/False.
+ThinkingSetting = bool | ThinkingLevel
 
 
-def thinking_from_env() -> ThinkingLevel | None:
-    raw = os.getenv("THINKING_LEVEL", "").strip()
-    if not raw:
-        return None
-    value = raw.lower()
-    if value == "true":
-        return True
-    if value == "false":
-        return False
-    if value in _THINKING_LEVELS:
-        return cast(ThinkingLevel, value)
-    raise ValueError(
-        "THINKING_LEVEL must be true, false, or one of "
-        f"{', '.join(sorted(_THINKING_LEVELS))}; got {raw!r}"
-    )
+class ConfigError(ValueError):
+    """The configuration is missing, or forbids what was asked for."""
+
+
+def thinking_label(thinking: ThinkingSetting | None) -> str:
+    if thinking is None:
+        return "provider default"
+    if isinstance(thinking, bool):
+        return "enabled" if thinking else "disabled"
+    return str(thinking)
 
 
 @dataclass(frozen=True)
 class ModelConfig:
+    """A fully resolved provider/model/thinking triple."""
+
     provider: str
     model: str
-    thinking: ThinkingLevel | None = None
+    thinking: ThinkingSetting | None = None
 
     def validate(self) -> None:
         """Raise if the provider or model is missing."""
         if not self.provider or not self.model:
-            raise ValueError("Set PROVIDER and MODEL in .env to build the agent.")
+            raise ConfigError(
+                "Set default_provider and default_model in config.json, "
+                "or pass --provider and --model."
+            )
 
     @property
     def model_id(self) -> str:
@@ -62,19 +83,126 @@ class ModelConfig:
         return bool(self.api_key_env and os.getenv(self.api_key_env))
 
 
-@dataclass(frozen=True)
-class Settings:
-    model: ModelConfig
+class ProviderConfig(BaseModel):
+    """What the app is allowed to ask of one provider."""
+
+    models: list[str] = Field(min_length=1)
+    thinking_levels: list[ThinkingSetting] = Field(default_factory=list)
+
+
+class TracingConfig(BaseModel):
+    """OTel export target; `endpoint` is the OTLP base URL, e.g.
+    `http://localhost:6006` for Phoenix. Unset means no tracing."""
+
+    endpoint: str | None = None
+    service_name: str = "pydantachat"
+
+
+class Settings(BaseModel):
+    """Contents of `config.json`, validated as one unit."""
+
+    default_provider: str
+    default_model: str
+    default_thinking: ThinkingSetting | None = None
+    providers: dict[str, ProviderConfig]
+    tracing: TracingConfig = Field(default_factory=TracingConfig)
+
+    @model_validator(mode="after")
+    def _defaults_are_allowed(self) -> Settings:
+        # Fails at load time rather than on the first request.
+        self.resolve()
+        return self
+
+    def resolve(
+        self,
+        provider: str | None = None,
+        model: str | None = None,
+        thinking: ThinkingSetting | None = None,
+    ) -> ModelConfig:
+        """Return an allowed model, overriding the defaults where given.
+
+        `thinking=None` means "use `default_thinking`"; pass `False` to ask for
+        thinking to be off.
+        """
+        provider = provider or self.default_provider
+        config = self.providers.get(provider)
+        if config is None:
+            known = ", ".join(sorted(self.providers)) or "none"
+            raise ConfigError(
+                f"Provider {provider!r} is not configured in config.json "
+                f"(known: {known})."
+            )
+
+        if model is None:
+            if provider != self.default_provider:
+                allowed = ", ".join(config.models)
+                raise ConfigError(
+                    f"No model given for {provider!r}; pass one of: {allowed}."
+                )
+            model = self.default_model
+
+        if model not in config.models:
+            allowed = ", ".join(config.models)
+            raise ConfigError(
+                f"Model {model!r} is not allowed for {provider!r} (allowed: {allowed})."
+            )
+
+        if thinking is None:
+            thinking = self.default_thinking
+        if thinking is not None and thinking not in config.thinking_levels:
+            allowed = (
+                ", ".join(thinking_label(level) for level in config.thinking_levels)
+                or "none"
+            )
+            raise ConfigError(
+                f"Thinking {thinking_label(thinking)!r} is not allowed for "
+                f"{provider!r} (allowed: {allowed})."
+            )
+
+        return ModelConfig(provider=provider, model=model, thinking=thinking)
+
+    @property
+    def model(self) -> ModelConfig:
+        return self.resolve()
 
     @classmethod
-    def from_env(cls) -> Settings:
-        return cls(
-            model=ModelConfig(
-                provider=os.getenv("PROVIDER", "").strip(),
-                model=os.getenv("MODEL", "").strip(),
-                thinking=thinking_from_env(),
-            )
-        )
+    def from_dict(cls, data: dict[str, object]) -> Settings:
+        try:
+            return cls.model_validate(data)
+        except ValidationError as exc:
+            raise ConfigError(f"config.json is invalid:\n{exc}") from exc
+
+    @classmethod
+    def from_file(cls, path: Path | str = DEFAULT_CONFIG_PATH) -> Settings:
+        path = Path(path)
+        try:
+            data = json.loads(path.read_text())
+        except FileNotFoundError as exc:
+            raise ConfigError(
+                f"Config file not found: {path}. Run from the project root or "
+                "pass --config."
+            ) from exc
+        except json.JSONDecodeError as exc:
+            raise ConfigError(f"{path} is not valid JSON: {exc}") from exc
+        try:
+            return cls.model_validate(data)
+        except ValidationError as exc:
+            raise ConfigError(f"{path} is invalid:\n{exc}") from exc
 
 
-settings = Settings.from_env()
+@cache
+def get_settings() -> Settings:
+    """The app's configuration, loaded once from `config.json`."""
+    return Settings.from_file()
+
+
+def thinking_from_cli(value: str | None) -> ThinkingSetting | None:
+    """Coerce a `--thinking` argument; None keeps the configured default."""
+    if value is None:
+        return None
+    lowered = value.strip().lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    return cast(ThinkingLevel, lowered)

@@ -4,7 +4,7 @@ from pydantic_ai import Agent
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models import Model
 
-from pydantachat.settings import ModelConfig, settings
+from pydantachat.settings import ModelConfig, get_settings
 
 
 def get_even(num: int) -> bool:
@@ -18,7 +18,7 @@ def build_agent(
 ) -> Agent:
     """Build the app agent; an injected model or config bypasses settings."""
     if model is None:
-        config = config or settings.model
+        config = config or get_settings().model
         model = config.model_id
         model_settings = config.model_settings
     else:

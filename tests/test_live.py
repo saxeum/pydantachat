@@ -9,13 +9,13 @@ import pytest
 from pydantic_ai.messages import ModelMessage, ToolReturnPart
 
 from pydantachat.agent import Chat
-from pydantachat.settings import settings
+from pydantachat.settings import get_settings
 
 pytestmark = [
     pytest.mark.live,
     pytest.mark.skipif(
-        not settings.model.has_api_key,
-        reason="active provider API key is not set",
+        not get_settings().model.has_api_key,
+        reason="default provider's API key is not set",
     ),
 ]
 

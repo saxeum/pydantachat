@@ -8,7 +8,7 @@ OpenTelemetry traces sent to a local [Arize Phoenix](https://phoenix.arize.com).
 
 ```bash
 uv sync
-cp .env.example .env    # add the API key for your provider
+cp .env.example .env    # add the API keys you have
 docker compose up -d    # optional: Phoenix UI on http://localhost:6006
 uv run pydantachat
 ```
@@ -17,23 +17,45 @@ Python 3.14 or newer.
 
 ## Configuration
 
-Set these in `.env` or the environment:
+Everything except secrets lives in `config.json`:
 
-- `PROVIDER` — Pydantic AI provider name, e.g. `deepseek`, `openai`,
-  `openrouter`.
-- `MODEL` — model name within that provider, e.g. `deepseek-flash`.
-- `<PROVIDER>_API_KEY` — the key for the selected provider, with `-` replaced
-  by `_` and uppercased: `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`,
-  `OPENROUTER_API_KEY`. Only the selected provider's key is read, so several
-  keys can live in `.env` at once.
-- `THINKING_LEVEL` — `true`, `false`, or `minimal`/`low`/`medium`/`high`/
-  `xhigh`/`max`; empty uses the provider default.
+```json
+{
+  "default_provider": "deepseek",
+  "default_model": "deepseek-flash",
+  "default_thinking": "high",
+  "providers": {
+    "deepseek": {
+      "models": ["deepseek-flash"],
+      "thinking_levels": ["low", "medium", "high", "max"]
+    }
+  },
+  "tracing": {"endpoint": "http://localhost:6006", "service_name": "pydantachat"}
+}
+```
 
-`.env` is loaded once at import into `pydantachat.settings.settings`, which
-exposes a `ModelConfig` (`model_id`, `model_settings`, `api_key_env`,
-`has_api_key`). Switching provider/model/thinking is just a change to those
-variables — nothing in the code names a provider. Callers that want an
-explicit configuration can pass `build_agent(config=ModelConfig(...))`.
+- `default_provider` / `default_model` / `default_thinking` — what runs when
+  nothing else is asked for. `default_thinking` takes a level, `true`, `false`,
+  or `null` for the provider's own default.
+- `providers.<name>.models` — the models that may be requested from that
+  provider; anything else is refused before a request is made.
+- `providers.<name>.thinking_levels` — the unified thinking levels that
+  provider accepts. Pydantic AI translates them into each provider's native
+  control (DeepSeek `reasoning_effort`, OpenRouter `reasoning`, ...), so
+  listing only the levels a provider really honours keeps a silent downgrade
+  from passing as a measurement.
+- `tracing.endpoint` — OTLP base URL, e.g. `http://localhost:6006` for Phoenix;
+  `null` turns tracing off. `tracing.service_name` defaults to `pydantachat`.
+
+The file is validated as one unit at load, so a default that is missing from
+its own allowed list fails immediately rather than on the first request, and an
+unknown provider, model or level is reported along with the values that would
+work.
+
+Only secrets go in `.env`: one API key per provider, under the names Pydantic
+AI itself reads — `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`,
+i.e. `<PROVIDER>_API_KEY`. Only the selected provider's key is read, so all
+three can sit there at once.
 
 ## Tests
 
@@ -42,7 +64,7 @@ uv run pytest          # offline: TestModel/FunctionModel only
 uv run pytest -m live  # opt-in smoke tests against the real provider API
 ```
 
-The live suite is skipped unless the active provider's API key is set (in the
+The live suite is skipped unless the default provider's API key is set (in the
 environment or in `.env`). It asserts only invariants — completion, non-empty
 output, tool execution — never exact wording; wording quality belongs to the
 eval harness.
@@ -55,9 +77,18 @@ make evals-baseline   # save reports/baseline.json
 make evals-compare    # run again and diff against the baseline
 ```
 
-Requires the active provider's API key. Runs the evenness cases three times
-each — including one that must use the `get_even` tool and one that must not
-use any tool — and prints per-case results plus the aggregate pass rate. The
+Requires the default provider's API key. Provider, model and thinking level
+come from `config.json`; `--provider`, `--model` and `--thinking` override them
+for a single run, and `--config` points at a different file:
+
+```bash
+uv run python -m pydantachat.evals --provider openrouter \
+  --model nvidia/nemotron-3-super-120b-a12b --thinking low
+```
+
+Runs the evenness cases three times each — including one that must use the
+`get_even` tool and one that must not use any tool — and prints per-case
+results plus the aggregate pass rate. The
 tool cases also check the tool spans and their arguments, so a correct answer
 without the right tool call fails. Reports are written under `reports/` and are
 git-ignored. Each run prints the model, effective thinking mode, total model
@@ -65,8 +96,9 @@ cost, and total thinking tokens. This is a measurement, not a CI gate.
 
 ## Tracing
 
-Opt-in, and driven by one variable: set `OTEL_EXPORTER_OTLP_ENDPOINT` and spans
-are exported over OTLP/HTTP; leave it empty and the agent runs with no observers.
+Opt-in, driven by `tracing.endpoint` in `config.json`: set the OTLP base URL and
+spans are exported over OTLP/HTTP to `<endpoint>/v1/traces`; leave it `null` and
+the agent runs with no observers.
 Pydantic AI emits plain OTel spans, so Jaeger, otel-tui or Langfuse are the same
 change to a different URL.
 

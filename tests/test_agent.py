@@ -1,3 +1,7 @@
+import json
+from pathlib import Path
+from typing import Any
+
 import pytest
 from pydantic_ai import Agent, models
 from pydantic_ai.messages import (
@@ -11,7 +15,30 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
 
 from pydantachat.agent import Chat, build_agent, get_even
-from pydantachat.settings import Settings, thinking_from_env
+from pydantachat.settings import (
+    ConfigError,
+    Settings,
+    thinking_from_cli,
+    thinking_label,
+)
+
+CONFIG: dict[str, Any] = {
+    "default_provider": "acme",
+    "default_model": "acme-model",
+    "default_thinking": "low",
+    "providers": {
+        "acme": {
+            "models": ["acme-model", "acme-small"],
+            "thinking_levels": ["low", "high"],
+        },
+        "other": {"models": ["other-model"], "thinking_levels": []},
+    },
+    "tracing": {"endpoint": None, "service_name": "tests"},
+}
+
+
+def settings(**overrides: Any) -> Settings:
+    return Settings.from_dict({**CONFIG, **overrides})
 
 
 @pytest.fixture(autouse=True)
@@ -30,58 +57,140 @@ def test_get_even_false(num: int) -> None:
     assert get_even(num) is False
 
 
-def test_settings_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("PROVIDER", "acme")
-    monkeypatch.setenv("MODEL", "acme-model")
-    monkeypatch.setenv("THINKING_LEVEL", "low")
+def test_settings_resolves_configured_defaults() -> None:
+    config = settings().model
 
-    settings = Settings.from_env()
-
-    assert settings.model.model_id == "acme:acme-model"
-    assert settings.model.model_settings == {"thinking": "low"}
+    assert config.model_id == "acme:acme-model"
+    assert config.thinking == "low"
+    assert config.model_settings == {"thinking": "low"}
 
 
-def test_settings_requires_provider_and_model(
+def test_settings_without_thinking_uses_provider_default() -> None:
+    config = settings(default_thinking=None).model
+
+    assert config.thinking is None
+    assert config.model_settings is None
+
+
+def test_settings_rejects_unknown_default_provider() -> None:
+    with pytest.raises(ConfigError, match="Provider 'missing' is not configured"):
+        settings(default_provider="missing")
+
+
+def test_settings_rejects_disallowed_default_model() -> None:
+    with pytest.raises(ConfigError, match="Model 'nope' is not allowed"):
+        settings(default_model="nope")
+
+
+def test_settings_rejects_disallowed_default_thinking() -> None:
+    with pytest.raises(ConfigError, match="Thinking 'medium' is not allowed"):
+        settings(default_thinking="medium")
+
+
+def test_settings_requires_at_least_one_model() -> None:
+    with pytest.raises(ConfigError, match="config.json is invalid"):
+        settings(providers={"acme": {"models": []}})
+
+
+def test_resolve_applies_overrides() -> None:
+    config = settings().resolve(model="acme-small", thinking="high")
+
+    assert config.model_id == "acme:acme-small"
+    assert config.thinking == "high"
+
+
+def test_resolve_rejects_unknown_provider() -> None:
+    with pytest.raises(ConfigError, match="Provider 'nope' is not configured"):
+        settings().resolve(provider="nope")
+
+
+def test_resolve_rejects_disallowed_model() -> None:
+    with pytest.raises(ConfigError, match="Model 'other-model' is not allowed"):
+        settings().resolve(model="other-model")
+
+
+def test_resolve_rejects_disallowed_thinking() -> None:
+    with pytest.raises(ConfigError, match="Thinking 'minimal' is not allowed"):
+        settings().resolve(thinking="minimal")
+
+
+def test_resolve_rejects_thinking_a_provider_does_not_offer() -> None:
+    with pytest.raises(ConfigError, match="Thinking 'low' is not allowed for 'other'"):
+        settings().resolve(provider="other", model="other-model", thinking="low")
+
+
+def test_resolve_requires_a_model_for_a_non_default_provider() -> None:
+    with pytest.raises(ConfigError, match="No model given for 'other'"):
+        settings().resolve(provider="other")
+
+
+def test_resolve_can_disable_thinking() -> None:
+    config = settings(
+        providers={
+            "acme": {"models": ["acme-model"], "thinking_levels": [False, "low"]}
+        }
+    ).resolve(thinking=False)
+
+    assert config.thinking is False
+    assert config.model_settings == {"thinking": False}
+
+
+def test_api_key_env_is_provider_specific(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("PROVIDER", raising=False)
-    monkeypatch.delenv("MODEL", raising=False)
-
-    settings = Settings.from_env()
-
-    with pytest.raises(ValueError, match="PROVIDER"):
-        settings.model.validate()
-
-
-def test_settings_uses_provider_specific_key_env(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("PROVIDER", "acme")
-    monkeypatch.setenv("MODEL", "acme-model")
     monkeypatch.setenv("ACME_API_KEY", "test-key")
 
-    settings = Settings.from_env()
+    config = settings().model
 
-    assert settings.model.api_key_env == "ACME_API_KEY"
-    assert settings.model.has_api_key
-
-
-def test_thinking_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("THINKING_LEVEL", "low")
-    assert thinking_from_env() == "low"
-
-    monkeypatch.setenv("THINKING_LEVEL", "false")
-    assert thinking_from_env() is False
-
-    monkeypatch.setenv("THINKING_LEVEL", "")
-    assert thinking_from_env() is None
+    assert config.api_key_env == "ACME_API_KEY"
+    assert config.has_api_key
 
 
-def test_thinking_from_env_rejects_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("THINKING_LEVEL", "bogus")
+def test_has_no_api_key_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ACME_API_KEY", raising=False)
 
-    with pytest.raises(ValueError, match="THINKING_LEVEL"):
-        thinking_from_env()
+    assert not settings().model.has_api_key
+
+
+def test_tracing_is_off_by_default() -> None:
+    tracing = Settings.from_dict({**CONFIG, "tracing": {}}).tracing
+
+    assert tracing.endpoint is None
+    assert tracing.service_name == "pydantachat"
+
+
+def test_settings_from_file(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps(CONFIG))
+
+    assert Settings.from_file(path).model.model_id == "acme:acme-model"
+
+
+def test_settings_from_file_missing(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="Config file not found"):
+        Settings.from_file(tmp_path / "absent.json")
+
+
+def test_settings_from_file_invalid_json(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text("{not json")
+
+    with pytest.raises(ConfigError, match="not valid JSON"):
+        Settings.from_file(path)
+
+
+def test_thinking_from_cli() -> None:
+    assert thinking_from_cli("HIGH") == "high"
+    assert thinking_from_cli("true") is True
+    assert thinking_from_cli("false") is False
+    assert thinking_from_cli(None) is None
+
+
+def test_thinking_label() -> None:
+    assert thinking_label(None) == "provider default"
+    assert thinking_label(True) == "enabled"
+    assert thinking_label(False) == "disabled"
+    assert thinking_label("high") == "high"
 
 
 async def test_send() -> None:
