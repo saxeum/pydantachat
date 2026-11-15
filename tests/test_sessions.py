@@ -10,7 +10,11 @@ from pydantachat.sessions import Sessions
 
 def _sessions(**kwargs: Any) -> Sessions:
     """A store whose chats are scripted, so no provider key is needed."""
-    return Sessions(make_chat=lambda: Chat(agent=build_agent(TestModel())), **kwargs)
+
+    def make_chat(_owner: str, _session_id: str) -> Chat:
+        return Chat(agent=build_agent(TestModel()))
+
+    return Sessions(make_chat=make_chat, **kwargs)
 
 
 class Clock:

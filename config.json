@@ -37,5 +37,6 @@
   "tracing": {
     "endpoint": "http://localhost:6006",
     "service_name": "pydantachat"
-  }
+  },
+  "db_path": "data.db"
 }

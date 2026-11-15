@@ -8,7 +8,7 @@ exact wording, which belongs to the eval harness.
 import pytest
 from pydantic_ai.messages import ModelMessage, ToolReturnPart
 
-from pydantachat.agent import Chat, EvennessAnswer
+from pydantachat.agent import Chat, build_agent
 from pydantachat.settings import get_settings
 
 pytestmark = [
@@ -19,44 +19,54 @@ pytestmark = [
     ),
 ]
 
+ORDERS: list[dict[str, str]] = [
+    {
+        "id": "cus_live-01",
+        "placed_at": "2026-11-01",
+        "status": "delivered",
+        "total": "89.99 USD",
+    }
+]
 
-async def test_live_streaming_yields_a_complete_answer() -> None:
-    chat = Chat()
 
-    partials = [
-        partial async for partial in chat.send_stream("Is 12 even? Use the tool.")
-    ]
+async def _orders() -> list[dict[str, str]]:
+    return ORDERS
 
-    assert partials
-    answer = partials[-1]
-    assert isinstance(answer, EvennessAnswer)
-    assert answer.number == 12
-    assert answer.is_even is True
+
+def _chat() -> Chat:
+    return Chat(agent=build_agent(list_orders=_orders))
+
+
+async def test_live_streaming_yields_text() -> None:
+    chat = _chat()
+
+    deltas = [delta async for delta in chat.send_stream("Hello in one short sentence.")]
+
+    assert deltas
+    assert "".join(deltas).strip()
     assert chat.history
 
 
-async def test_live_tool_path_executes_get_even() -> None:
-    chat = Chat()
+async def test_live_tool_path_executes_get_orders() -> None:
+    chat = _chat()
 
     answer = await chat.send(
-        "Call the get_even tool with num=4, then answer. "
-        "You must call the tool before answering."
+        "What is the status of my order? You must call the get_orders tool first."
     )
 
-    assert answer.number == 4
-    assert answer.is_even is True
-    tool_returns = _get_even_returns(chat.history)
-    if not tool_returns:
+    assert answer
+    returned = _tool_returns(chat.history)
+    if not returned:
         # The prompt is directive, but a miss is a known model-behaviour flake
         # rather than a broken tool path.
-        pytest.skip("model did not call get_even")
-    assert all(part.content is True for part in tool_returns)
+        pytest.skip("model did not call get_orders")
+    assert "delivered" in str(returned[0].content)
 
 
-def _get_even_returns(messages: list[ModelMessage]) -> list[ToolReturnPart]:
+def _tool_returns(messages: list[ModelMessage]) -> list[ToolReturnPart]:
     return [
         part
         for message in messages
         for part in getattr(message, "parts", [])
-        if isinstance(part, ToolReturnPart) and part.tool_name == "get_even"
+        if isinstance(part, ToolReturnPart) and part.tool_name == "get_orders"
     ]

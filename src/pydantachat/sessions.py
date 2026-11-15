@@ -7,6 +7,9 @@ Redis (#34) should not touch a route.
 Sessions are owned by the email that created them and are only reachable by that
 email. Ids are opaque and server-generated; a session id the store does not know
 starts a new conversation rather than letting a caller claim someone else's.
+
+The factory receives the owner and the new session id, so it can bind per-customer
+state (the orders token is scoped to the session) before the first turn.
 """
 
 import time
@@ -15,6 +18,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from pydantachat.agent import Chat
+
+MakeChat = Callable[[str, str], Chat]
 
 
 @dataclass
@@ -29,12 +34,12 @@ class Sessions:
 
     def __init__(
         self,
-        make_chat: Callable[[], Chat] = Chat,
+        make_chat: MakeChat | None = None,
         ttl_seconds: float = 3600.0,
         max_sessions: int = 1000,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        self._make_chat = make_chat
+        self._make_chat = make_chat if make_chat is not None else _default_chat
         self._ttl = ttl_seconds
         self._max = max_sessions
         self._clock = clock
@@ -54,7 +59,7 @@ class Sessions:
                 return session_id, entry.chat
 
         new_id = uuid.uuid4().hex
-        chat = self._make_chat()
+        chat = self._make_chat(owner, new_id)
         self._entries[new_id] = _Entry(chat=chat, owner=owner, last_used=self._clock())
         self._evict_overflow()
         return new_id, chat
@@ -71,3 +76,8 @@ class Sessions:
         while len(self._entries) > self._max:
             oldest = min(self._entries, key=lambda key: self._entries[key].last_used)
             del self._entries[oldest]
+
+
+def _default_chat(_owner: str, _session_id: str) -> Chat:
+    """A chat with no tools, for callers that only need a conversation."""
+    return Chat()

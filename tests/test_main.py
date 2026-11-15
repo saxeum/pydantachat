@@ -6,12 +6,13 @@ import logging
 
 import pytest
 from pydantic_ai.exceptions import ModelHTTPError, UserError
-from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
+from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
+from pydantic_ai.models.test import TestModel
 
 from pydantachat import main as cli
 from pydantachat.agent import Chat, build_agent
-from pydantachat.settings import ConfigError
+from pydantachat.settings import ConfigError, Settings
 
 
 def _feed(monkeypatch: pytest.MonkeyPatch, lines: list[str]) -> None:
@@ -28,7 +29,9 @@ def _feed(monkeypatch: pytest.MonkeyPatch, lines: list[str]) -> None:
 
 
 def _use_model(monkeypatch: pytest.MonkeyPatch, model: FunctionModel) -> None:
-    monkeypatch.setattr(cli, "Chat", lambda: Chat(agent=build_agent(model)))
+    monkeypatch.setattr(
+        cli, "make_chat", lambda _settings: Chat(agent=build_agent(model))
+    )
     monkeypatch.setattr(cli, "setup_telemetry", lambda _config: None)
 
 
@@ -41,9 +44,7 @@ def _failing(exc: Exception) -> FunctionModel:
 
 def _answering() -> FunctionModel:
     def model(_messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
-        return ModelResponse(
-            parts=[ToolCallPart("final_result", {"number": 4, "is_even": True})]
-        )
+        return ModelResponse(parts=[TextPart("You have three orders.")])
 
     return FunctionModel(model)
 
@@ -92,17 +93,35 @@ def test_an_unexpected_error_still_raises(monkeypatch: pytest.MonkeyPatch) -> No
         asyncio.run(cli.run())
 
 
-def test_an_answer_is_printed_as_json(
+def test_an_answer_is_printed_as_text(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _feed(monkeypatch, ["is 4 even?", "exit"])
+    _feed(monkeypatch, ["what did I order?", "exit"])
     _use_model(monkeypatch, _answering())
 
     asyncio.run(cli.run())
 
-    out = capsys.readouterr().out
-    assert '"number": 4' in out
-    assert '"is_even": true' in out
+    assert "You have three orders." in capsys.readouterr().out
+
+
+def test_the_cli_seeds_its_own_database(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The single-tenant CLI gets its own seeded database and order tool."""
+    real_build_agent = cli.build_agent
+
+    def build_with_test_model(**kwargs: object):
+        return real_build_agent(model=TestModel(), **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(cli, "build_agent", build_with_test_model)
+    settings = Settings.from_file().model_copy(
+        update={"db_path": str(tmp_path / "cli.db")}
+    )
+
+    chat = cli.make_chat(settings)
+
+    assert (tmp_path / "cli.db").exists()
+    assert chat.agent is not None
 
 
 def test_ctrl_c_at_the_prompt_exits(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -147,12 +166,12 @@ async def test_a_cancelled_turn_leaves_history_untouched(
         await asyncio.sleep(30)
         raise AssertionError("unreachable")
 
-    def make_chat() -> Chat:
+    def make_chat(_settings: Settings) -> Chat:
         chat = Chat(agent=build_agent(FunctionModel(model)))
         chat_ref.append(chat)
         return chat
 
-    monkeypatch.setattr(cli, "Chat", make_chat)
+    monkeypatch.setattr(cli, "make_chat", make_chat)
     monkeypatch.setattr(cli, "setup_telemetry", lambda _config: None)
     _feed(monkeypatch, ["hello", "exit"])
 
@@ -165,10 +184,10 @@ async def test_a_cancelled_turn_leaves_history_untouched(
 
 
 def test_a_missing_key_exits_before_the_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
-    def no_key() -> Chat:
+    def no_key(_settings: Settings) -> Chat:
         raise UserError("Set the DEEPSEEK_API_KEY environment variable")
 
-    monkeypatch.setattr(cli, "Chat", no_key)
+    monkeypatch.setattr(cli, "make_chat", no_key)
     monkeypatch.setattr(cli, "setup_telemetry", lambda _config: None)
     _feed(monkeypatch, ["never reached"])
 

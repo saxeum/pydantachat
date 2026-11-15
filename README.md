@@ -4,44 +4,36 @@ A minimal [Pydantic AI](https://ai.pydantic.dev) agent calling a configurable
 model provider, with
 OpenTelemetry traces sent to a local [Arize Phoenix](https://phoenix.arize.com).
 
+The agent answers questions about the signed-in customer's orders. The orders
+live in SQLite behind an HTTP API that trusts only a short-lived, customer-scoped
+token, so the model never decides whose data it can read. See
+[Orders and auth](#orders-and-auth).
+
 ## Run
 
 ```bash
 uv sync
 cp .env.example .env    # add the API keys you have
 docker compose up -d    # optional: Phoenix UI on http://localhost:6006
-uv run pydantachat
+uv run pydantachat      # single-tenant CLI, acts for a local demo customer
 ```
 
 Python 3.14 or newer.
 
 ## Output
 
-The agent answers as a validated `EvennessAnswer`, not free text, so the reply is
-the same shape every time and the fields are typed:
+`Chat.send` returns text; `Chat.send_stream` yields text deltas as the model
+produces them. The model is told to call `get_orders` before answering anything
+about orders, and not to guess:
 
-```json
-{
-  "number": 4,
-  "is_even": true,
-  "reasoning": "4 leaves no remainder when divided by 2."
-}
+```
+> what is the status of my latest order?
+Your most recent order (2026-11-01) was delivered; it totalled 89.99 USD.
 ```
 
-The CLI prints that JSON. `Chat.send` returns the model; `Chat.send_stream`
-yields **partial models** as the schema fills in — once the output is typed there
-are no text deltas to stream.
-
-Structured output and thinking interact on DeepSeek. While thinking is on,
-DeepSeek rejects a forced tool choice, so Pydantic AI sends `tool_choice='auto'`
-and the model is free to answer in prose instead of calling the output tool; the
-run then retries rather than returning prose. With thinking off the output tool
-is forced again:
-
-```bash
-uv run python -m pydantachat.evals --thinking high   # tool choice is 'auto'
-uv run python -m pydantachat.evals --thinking false  # output tool is forced
-```
+The tool returns only this customer's rows, with the customer id removed and
+totals already formatted. What makes that true is not the prompt: the tool takes
+no customer argument and the identity comes from the wrapper's token.
 
 ## Web API
 
@@ -65,8 +57,10 @@ The same agent over HTTP, with two entry points over `Chat.send` and
 
 | Endpoint | What it does |
 | --- | --- |
-| `POST /api/chat` | one complete `EvennessAnswer` |
-| `POST /api/chat/stream` | the same answer as server-sent events, one partial per `data:` frame, ending with `data: [DONE]` |
+| `POST /api/chat` | one complete text answer |
+| `POST /api/chat/stream` | the same answer as server-sent events, one `{"text": ...}` delta per `data:` frame, ending with `data: [DONE]` |
+| `GET /api/orders` | the token customer's orders (orders token only) |
+| `GET /api/customers/{id}/orders` | the same data, 403 unless `id` is the token's customer |
 | `GET /api/me` | `{email, name, mode}` — `mode` is `cookie` or `bearer` |
 | `GET /health` | liveness; touches no configuration |
 | `GET /ready` | 503 until the config and the provider key are present |
@@ -98,6 +92,29 @@ Agent failures become generic responses — `502` for provider problems, `500` f
 a configuration error, `401`/`403` for credentials — with the detail logged
 rather than returned.
 
+### Orders and auth
+
+The API stops trusting the agent and trusts only a credential:
+
+- The user signs in with Google OIDC, so the wrapper knows the email. It maps the
+  email to a `customers` row and mints a signed token whose claim is that
+  customer id and the chat session id, valid for two minutes.
+- The tool is bound to that token's customer. It takes **no customer argument**,
+  calls `GET /api/orders` over HTTP, and returns rows. The token is minted per
+  call and never enters the prompt, the tool result, or the transcript.
+- `GET /api/orders` derives the customer from the token and nothing else. The
+  route does not accept the browser cookie or a Google ID token, so only the
+  agent's scoped credential can read orders.
+
+That is our own signed token, not an identity-provider on-behalf-of grant; the
+secret is `SESSION_SECRET` under a distinct salt. The test that matters is the
+failure one: a token for customer A asking for B's orders gets 403, and that test
+fails if the claim check is removed.
+
+Read-only, single-customer scope bounds the damage. It does not make the tool
+safe for writes: `cancel_order` or `issue_refund` would need server-side business
+rules and confirmation of their own.
+
 For a browser-level check of the page (needs the app running and
 `uv run --with playwright`): `python scripts/ui_smoke.py`. It forges a session
 cookie from `SESSION_SECRET`, so it skips the Google round-trip, and it is not
@@ -124,7 +141,8 @@ Everything except secrets lives in `config.json`:
       }
     }
   },
-  "tracing": {"endpoint": "http://localhost:6006", "service_name": "pydantachat"}
+  "tracing": {"endpoint": "http://localhost:6006", "service_name": "pydantachat"},
+  "db_path": "data.db"
 }
 ```
 
@@ -150,6 +168,9 @@ Everything except secrets lives in `config.json`:
   inheriting a level that model may not support.
 - `tracing.endpoint` — OTLP base URL, e.g. `http://localhost:6006` for Phoenix;
   `null` turns tracing off. `tracing.service_name` defaults to `pydantachat`.
+- `db_path` — the SQLite file. It is created and seeded at startup: every entry
+  in `ALLOWED_EMAILS` gets a customer row and three demo orders, idempotently,
+  so an email with no row is a 403 rather than an empty list.
 
 The file is validated as one unit at load, so a default that is missing from
 its own allowed list fails immediately rather than on the first request, and an
@@ -192,12 +213,12 @@ uv run python -m pydantachat.evals --provider openrouter \
   --model nvidia/nemotron-3-super-120b-a12b --thinking low
 ```
 
-Runs the evenness cases three times each — including one that must use the
-`get_even` tool and one that must not use any tool — and prints per-case
-results plus the aggregate pass rate. The tool cases also check the tool spans
-and their arguments, so a correct answer without the right tool call fails.
-Reports are written under `reports/` and are git-ignored. Each run prints the
-model, effective thinking mode, total model cost, and total thinking tokens.
+Runs the order cases three times each: one must cite every order, one must
+answer a status question, and one asks about another customer and must return no
+order data. The first two also assert that `get_orders` ran, so a correct answer
+with no tool call fails. Reports are written under `reports/` and are git-ignored.
+Each run seeds a throwaway database, so it never touches `data.db`, and prints
+the model, effective thinking mode, total model cost, and total thinking tokens.
 This is a measurement, not a CI gate.
 
 `.github/workflows/live.yml` does the same once a week (and on manual dispatch):

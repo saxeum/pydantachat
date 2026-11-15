@@ -10,7 +10,6 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from pydantic_ai.exceptions import AgentRunError, ModelHTTPError, UserError
 
-from pydantachat.agent import EvennessAnswer
 from pydantachat.auth import CurrentUser, current_user
 from pydantachat.sessions import Sessions
 
@@ -32,7 +31,7 @@ class ChatRequest(BaseModel):
 
 class ChatReply(BaseModel):
     session_id: str
-    reply: EvennessAnswer
+    reply: str
 
 
 def get_sessions(request: Request) -> Sessions:
@@ -99,8 +98,8 @@ async def _events(
 ) -> AsyncIterator[str]:
     yield _event("session", {"session_id": session_id})
     try:
-        async for partial in conversation.send_stream(message):
-            yield f"data: {partial.model_dump_json()}\n\n"
+        async for delta in conversation.send_stream(message):
+            yield f"data: {json.dumps({'text': delta})}\n\n"
     except (AgentRunError, UserError) as exc:
         logger.warning("stream failed: %s", exc)
         yield _event("error", {"detail": "provider request failed"})

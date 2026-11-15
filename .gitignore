@@ -24,3 +24,6 @@ terraform.tfvars
 
 # Eval reports
 reports/
+
+# Local SQLite database
+*.db

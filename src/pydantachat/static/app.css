@@ -103,6 +103,8 @@ header p {
 
 #log article p {
   margin: 0;
+  /* Replies are plain text: keep the model's line breaks and lists. */
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 

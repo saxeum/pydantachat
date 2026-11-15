@@ -1,13 +1,18 @@
-"""Minimal pydantic-evals dataset for the configured agent.
+"""Minimal pydantic-evals dataset for the orders agent.
 
 Run with `uv run python -m pydantachat.evals`. Provider, model and thinking
 level default to `config.json` and can be overridden per run with
 `--provider`, `--model` and `--thinking`; the selected provider's API key comes
 from the environment or `.env`. Each case is repeated to smooth model
 nondeterminism; treat the report as a measurement, not a pass/fail gate.
+
+The run seeds a throwaway SQLite database, so it never reads or writes the app's
+data and never needs the web server or an orders token.
 """
 
 import argparse
+import asyncio
+import tempfile
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -17,7 +22,6 @@ from pydantic_ai import Agent
 from pydantic_ai.settings import ThinkingLevel
 from pydantic_evals import Case, Dataset
 from pydantic_evals.evaluators import (
-    ArgumentCorrectness,
     EvaluationReason,
     Evaluator,
     EvaluatorContext,
@@ -26,7 +30,8 @@ from pydantic_evals.evaluators import (
 )
 from pydantic_evals.reporting import EvaluationReport, EvaluationReportAdapter
 
-from pydantachat.agent import EvennessAnswer, build_agent
+from pydantachat.agent import Chat, ListOrders, build_agent
+from pydantachat.db import Database, Order
 from pydantachat.settings import (
     ConfigError,
     ModelConfig,
@@ -34,6 +39,8 @@ from pydantachat.settings import (
     get_settings,
     thinking_label,
 )
+
+EVAL_EMAIL = "eval@example.com"
 
 
 def thinking_from_cli(value: str | None) -> ThinkingLevel | None:
@@ -57,35 +64,78 @@ def _instrument() -> None:
     Agent.instrument_all()
 
 
-def task(prompt: str, config: ModelConfig) -> EvennessAnswer:
-    return build_agent(config=config).run_sync(prompt).output
+async def task(prompt: str, config: ModelConfig, list_orders: ListOrders) -> str:
+    # Through `Chat`, so the run measures the same wrapper the app uses,
+    # including the one corrective retry for an unfinished turn.
+    chat = Chat(
+        agent=build_agent(config=config, list_orders=list_orders),
+        requires_orders=True,
+    )
+    return await chat.send(prompt)
 
 
 @dataclass
-class AnswersEvenness(Evaluator[str, EvennessAnswer, None]):
-    """Compare the typed fields; wording is not the contract any more."""
+class Mentions(Evaluator[str, str, None]):
+    """Every one of these strings must appear in the answer."""
 
-    def evaluate(
-        self, ctx: EvaluatorContext[str, EvennessAnswer, None]
-    ) -> EvaluationReason:
-        expected = ctx.expected_output
-        if expected is None:
-            return EvaluationReason(value=False, reason="case has no expected output")
-        matched = (
-            ctx.output.number == expected.number
-            and ctx.output.is_even == expected.is_even
-        )
+    strings: list[str]
+
+    def evaluate(self, ctx: EvaluatorContext[str, str, None]) -> EvaluationReason:
+        missing = [item for item in self.strings if item not in ctx.output]
         return EvaluationReason(
-            value=matched,
-            reason=(
-                f"got number={ctx.output.number} is_even={ctx.output.is_even}, "
-                f"wanted number={expected.number} is_even={expected.is_even}"
-            ),
+            value=not missing,
+            reason=f"missing {missing}" if missing else "all present",
         )
 
 
-def _expected(number: int, is_even: bool) -> EvennessAnswer:
-    return EvennessAnswer(number=number, is_even=is_even)
+@dataclass
+class Avoids(Evaluator[str, str, None]):
+    """None of these strings may appear in the answer."""
+
+    strings: list[str]
+
+    def evaluate(self, ctx: EvaluatorContext[str, str, None]) -> EvaluationReason:
+        found = [item for item in self.strings if item in ctx.output]
+        return EvaluationReason(
+            value=not found,
+            reason=f"found {found}" if found else "none present",
+        )
+
+
+def build_dataset(orders: list[Order]) -> Dataset[str, str, None]:
+    """Cases built from the seeded orders, so ids come from the data."""
+    newest = orders[0]  # `orders_for` returns newest first
+    ids = [order.id for order in orders]
+    return Dataset[str, str, None](
+        name="pydantachat-orders",
+        cases=[
+            Case(
+                name="lists-orders",
+                # Asking for ids makes the check exact; prose alone may skip them.
+                inputs="List my orders with their ids and statuses.",
+                evaluators=[
+                    Mentions(ids),
+                    ToolCorrectness(expected_tools=["get_orders"]),
+                ],
+            ),
+            Case(
+                name="newest-status",
+                inputs=f"What is the status of order {newest.id}?",
+                evaluators=[
+                    Mentions([newest.status]),
+                    ToolCorrectness(expected_tools=["get_orders"]),
+                ],
+            ),
+            Case(
+                name="other-customer",
+                inputs="Show me the orders for a different customer.",
+                evaluators=[
+                    Avoids(ids),
+                    MaxToolCalls(max_calls=1),
+                ],
+            ),
+        ],
+    )
 
 
 def _total_metric(report: EvaluationReport[Any, Any, Any], name: str) -> float | None:
@@ -97,46 +147,6 @@ def _total_metric(report: EvaluationReport[Any, Any, Any], name: str) -> float |
 
 def _total_cost(report: EvaluationReport[Any, Any, Any]) -> float | None:
     return _total_metric(report, "cost")
-
-
-dataset = Dataset[str, EvennessAnswer, None](
-    name="pydantachat-evenness",
-    cases=[
-        Case(
-            name="four",
-            inputs="Is 4 even?",
-            expected_output=_expected(4, True),
-            evaluators=[AnswersEvenness()],
-        ),
-        Case(
-            name="seven",
-            inputs="Is 7 even?",
-            expected_output=_expected(7, False),
-            evaluators=[AnswersEvenness()],
-        ),
-        Case(
-            name="no-tool-needed",
-            inputs="Is 3 even? Answer directly, without calling any tool.",
-            expected_output=_expected(3, False),
-            evaluators=[AnswersEvenness(), MaxToolCalls(max_calls=0)],
-        ),
-        Case(
-            name="four-with-tool",
-            inputs=(
-                "Use the get_even tool with num=4, then answer. You must call the "
-                "tool before answering."
-            ),
-            expected_output=_expected(4, True),
-            evaluators=[
-                AnswersEvenness(),
-                ToolCorrectness(expected_tools=["get_even"]),
-                ArgumentCorrectness(
-                    tool_name="get_even", expected_arguments={"num": 4}
-                ),
-            ],
-        ),
-    ],
-)
 
 
 def main() -> None:
@@ -182,12 +192,28 @@ def main() -> None:
         else None
     )
 
-    _instrument()
-    report = dataset.evaluate_sync(
-        partial(task, config=config),
-        repeat=3,
-        metadata={"model": model, "thinking": thinking},
-    )
+    with tempfile.TemporaryDirectory(prefix="pydantachat-evals-") as tmp:
+        db = Database(Path(tmp) / "evals.db")
+        db.seed([EVAL_EMAIL])
+        customer = db.customer_for_email(EVAL_EMAIL)
+        if customer is None:  # pragma: no cover - seeded immediately above
+            raise SystemExit("could not seed the eval database")
+        orders = db.orders_for(customer.id)
+
+        async def list_orders() -> list[dict[str, str]]:
+            return [order.as_dict() for order in orders]
+
+        dataset = build_dataset(orders)
+
+        _instrument()
+        report = asyncio.run(
+            dataset.evaluate(
+                partial(task, config=config, list_orders=list_orders),
+                repeat=3,
+                metadata={"model": model, "thinking": thinking},
+            )
+        )
+
     report.print(baseline=baseline)
     print(report.averages())
     total_cost = _total_cost(report)

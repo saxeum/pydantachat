@@ -124,6 +124,7 @@ class Settings(BaseModel):
     default_thinking: ThinkingLevel | None = None
     providers: dict[str, ProviderConfig]
     tracing: TracingConfig = Field(default_factory=TracingConfig)
+    db_path: str = "data.db"
 
     @model_validator(mode="after")
     def _defaults_are_allowed(self) -> Settings:
