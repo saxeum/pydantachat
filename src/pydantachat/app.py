@@ -1,5 +1,6 @@
 """Application wiring. Serve with `uvicorn pydantachat.app:api`."""
 
+import logging
 import os
 import secrets
 from collections.abc import AsyncIterator
@@ -16,6 +17,8 @@ from pydantachat.db import Database
 from pydantachat.orders_client import HttpOrdersClient
 from pydantachat.sessions import Sessions
 from pydantachat.settings import ConfigError, get_auth, get_settings
+
+logger = logging.getLogger("pydantachat")
 
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -39,6 +42,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         raise RuntimeError(f"refusing to start: {exc}") from exc
 
     _require_single_worker()
+
+    if auth.local:
+        logger.warning(
+            "AUTH_MODE=local: Google sign-in is off; only loopback clients are "
+            "accepted. Do not expose this process on the network."
+        )
 
     db = Database(settings.db_path)
     db.seed(auth.allowed_emails)
