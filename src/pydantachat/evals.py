@@ -1,16 +1,19 @@
 """Minimal pydantic-evals dataset for the configured agent.
 
-Run with `uv run python -m pydantachat.evals` (requires `PROVIDER_API_KEY`).
-Each case is repeated to smooth model nondeterminism; treat the report as a
-measurement, not a pass/fail gate.
+Run with `uv run python -m pydantachat.evals`. Provider, model and thinking
+level default to `config.json` and can be overridden per run with
+`--provider`, `--model` and `--thinking`; the selected provider's API key comes
+from the environment or `.env`. Each case is repeated to smooth model
+nondeterminism; treat the report as a measurement, not a pass/fail gate.
 """
 
 import argparse
-import os
+from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic_ai import Agent
+from pydantic_ai.settings import ThinkingLevel
 from pydantic_evals import Case, Dataset
 from pydantic_evals.evaluators import (
     ArgumentCorrectness,
@@ -21,6 +24,25 @@ from pydantic_evals.evaluators import (
 from pydantic_evals.reporting import EvaluationReport, EvaluationReportAdapter
 
 from pydantachat.agent import build_agent
+from pydantachat.settings import (
+    ConfigError,
+    ModelConfig,
+    Settings,
+    get_settings,
+    thinking_label,
+)
+
+
+def thinking_from_cli(value: str | None) -> ThinkingLevel | None:
+    """Coerce a `--thinking` argument; None keeps the configured default."""
+    if value is None:
+        return None
+    lowered = value.strip().lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    return cast(ThinkingLevel, lowered)
 
 
 def _instrument() -> None:
@@ -32,8 +54,8 @@ def _instrument() -> None:
     Agent.instrument_all()
 
 
-def task(prompt: str) -> str:
-    return build_agent().run_sync(prompt).output
+def task(prompt: str, config: ModelConfig) -> str:
+    return build_agent(config=config).run_sync(prompt).output
 
 
 def _total_metric(report: EvaluationReport[Any, Any, Any], name: str) -> float | None:
@@ -45,27 +67,6 @@ def _total_metric(report: EvaluationReport[Any, Any, Any], name: str) -> float |
 
 def _total_cost(report: EvaluationReport[Any, Any, Any]) -> float | None:
     return _total_metric(report, "cost")
-
-
-def _model_label(agent: Agent) -> str:
-    return getattr(agent.model, "model_id", None) or str(agent.model)
-
-
-def _thinking_label(agent: Agent) -> str:
-    settings = agent.model_settings
-    thinking = settings.get("thinking") if isinstance(settings, dict) else None
-    if thinking is not None:
-        if isinstance(thinking, bool):
-            return "enabled" if thinking else "disabled"
-        return str(thinking)
-
-    profile = getattr(agent.model, "profile", None)
-    if isinstance(profile, dict):
-        if profile.get("thinking_always_enabled"):
-            return "always enabled"
-        if profile.get("thinking_enabled_by_default"):
-            return "provider default (enabled; effort unset)"
-    return "provider default"
 
 
 dataset = Dataset[str, str, None](
@@ -113,20 +114,38 @@ dataset = Dataset[str, str, None](
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--config", type=Path, help="config file (default: config.json)"
+    )
+    parser.add_argument("--provider", help="override default_provider")
+    parser.add_argument("--model", help="override default_model")
+    parser.add_argument(
+        "--thinking",
+        help="override default_thinking: a level, or true/false",
+    )
     parser.add_argument("--save", type=Path, help="write the report to this JSON file")
     parser.add_argument(
         "--baseline", type=Path, help="compare against a previously saved report"
     )
     args = parser.parse_args()
 
-    if not os.getenv("PROVIDER_API_KEY"):
-        raise SystemExit("Set PROVIDER_API_KEY (or put it in .env) to run evals.")
+    try:
+        settings = Settings.from_file(args.config) if args.config else get_settings()
+        config = settings.resolve(
+            provider=args.provider,
+            model=args.model,
+            thinking=thinking_from_cli(args.thinking),
+        )
+    except ConfigError as exc:
+        raise SystemExit(str(exc)) from exc
+
+    if not config.has_api_key:
+        raise SystemExit(f"Set {config.api_key_env} (or put it in .env) to run evals.")
     if args.baseline is not None and not args.baseline.exists():
         raise SystemExit(f"Baseline report not found: {args.baseline}")
 
-    agent = build_agent()
-    model = _model_label(agent)
-    thinking = _thinking_label(agent)
+    model = config.model_id
+    thinking = thinking_label(config.thinking)
     print(f"Model: {model}")
     print(f"Thinking: {thinking}")
 
@@ -138,7 +157,7 @@ def main() -> None:
 
     _instrument()
     report = dataset.evaluate_sync(
-        task,
+        partial(task, config=config),
         repeat=3,
         metadata={"model": model, "thinking": thinking},
     )

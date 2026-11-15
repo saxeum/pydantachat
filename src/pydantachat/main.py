@@ -1,19 +1,21 @@
 import asyncio
 
 from pydantachat.agent import Chat
+from pydantachat.settings import get_settings
 from pydantachat.telemetry import setup_telemetry
 
 EXIT_COMMANDS = {"exit", "quit"}
 
 
 async def run() -> None:
-    setup_telemetry()
+    settings = get_settings()
+    setup_telemetry(settings.tracing)
     chat = Chat()
 
     while True:
         try:
             line = input("> ").strip()
-        except (EOFError, KeyboardInterrupt):
+        except EOFError, KeyboardInterrupt:
             print()
             break
 
