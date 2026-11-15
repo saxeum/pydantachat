@@ -1,6 +1,7 @@
 """The HTTP surface: auth in both modes, chat, streaming, and error mapping."""
 
 import json
+import logging
 from collections.abc import Iterator
 
 import pytest
@@ -221,6 +222,20 @@ def test_garbage_is_401(
         verify_id_token("not-a-token", auth_config, key_set)
 
     assert caught.value.status_code == 401
+
+
+def test_a_stale_oauth_state_restarts_sign_in(
+    configured: None, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A callback with no stored state redirects to /login instead of a 500."""
+    client = TestClient(create_app())
+
+    with caplog.at_level(logging.WARNING):
+        response = client.get("/auth?code=abc&state=unknown", follow_redirects=False)
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/login"
+    assert "OAuth state mismatch" in caplog.text
 
 
 # --- chat ------------------------------------------------------------------

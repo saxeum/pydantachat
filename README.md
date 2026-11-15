@@ -88,6 +88,12 @@ start rather than admitting any Google account. `GOOGLE_CLIENT_ID`,
 come from `.env`; register `<APP_BASE_URL>/auth` as a redirect URI on the shared
 Google client.
 
+For local testing, open the app at exactly `APP_BASE_URL` — for the default,
+<http://localhost:8000>, not `127.0.0.1`. OAuth state is a cookie scoped to the
+origin that started the flow, while Google always redirects to
+`APP_BASE_URL/auth`; opening the app by another name makes the first callback
+miss the cookie and ask you to pick an account twice.
+
 Agent failures become generic responses — `502` for provider problems, `500` for
 a configuration error, `401`/`403` for credentials — with the detail logged
 rather than returned.
@@ -135,7 +141,7 @@ Everything except secrets lives in `config.json`:
         "deepseek-flash": {
           "thinking": {
             "levels": ["low", "medium", "high", "max"],
-            "can_disable": false
+            "can_disable": true
           }
         }
       }
@@ -178,9 +184,9 @@ unknown provider, model or level is reported along with the values that would
 work.
 
 Only secrets go in `.env`: one API key per provider, under the names Pydantic
-AI itself reads — `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`,
-i.e. `<PROVIDER>_API_KEY`. Only the selected provider's key is read, so all
-three can sit there at once.
+AI itself reads — `GOOGLE_API_KEY`, `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`,
+`OPENROUTER_API_KEY`, i.e. `<PROVIDER>_API_KEY`. Only the selected provider's
+key is read, so they can all sit there at once.
 
 ## Tests
 
