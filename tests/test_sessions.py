@@ -1,6 +1,16 @@
 """The session store: ownership, expiry, and the bound."""
 
+from typing import Any
+
+from pydantic_ai.models.test import TestModel
+
+from pydantachat.agent import Chat, build_agent
 from pydantachat.sessions import Sessions
+
+
+def _sessions(**kwargs: Any) -> Sessions:
+    """A store whose chats are scripted, so no provider key is needed."""
+    return Sessions(make_chat=lambda: Chat(agent=build_agent(TestModel())), **kwargs)
 
 
 class Clock:
@@ -12,7 +22,7 @@ class Clock:
 
 
 def test_a_session_is_reused_by_its_owner() -> None:
-    sessions = Sessions()
+    sessions = _sessions()
 
     first_id, first = sessions.get("me@example.com", None)
     second_id, second = sessions.get("me@example.com", first_id)
@@ -23,7 +33,7 @@ def test_a_session_is_reused_by_its_owner() -> None:
 
 
 def test_another_owner_cannot_reuse_a_session_id() -> None:
-    sessions = Sessions()
+    sessions = _sessions()
 
     mine, _ = sessions.get("me@example.com", None)
     theirs, _ = sessions.get("other@example.com", mine)
@@ -33,7 +43,7 @@ def test_another_owner_cannot_reuse_a_session_id() -> None:
 
 
 def test_an_unknown_session_id_starts_a_new_session() -> None:
-    sessions = Sessions()
+    sessions = _sessions()
 
     session_id, _ = sessions.get("me@example.com", "made-up")
 
@@ -42,7 +52,7 @@ def test_an_unknown_session_id_starts_a_new_session() -> None:
 
 def test_sessions_expire_after_the_ttl() -> None:
     clock = Clock()
-    sessions = Sessions(ttl_seconds=60, clock=clock)
+    sessions = _sessions(ttl_seconds=60, clock=clock)
 
     session_id, _ = sessions.get("me@example.com", None)
     clock.now = 61
@@ -54,7 +64,7 @@ def test_sessions_expire_after_the_ttl() -> None:
 
 
 def test_the_store_is_bounded() -> None:
-    sessions = Sessions(max_sessions=2)
+    sessions = _sessions(max_sessions=2)
 
     for _ in range(5):
         sessions.get("me@example.com", None)
