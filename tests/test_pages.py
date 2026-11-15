@@ -32,6 +32,7 @@ def test_index_carries_the_security_headers(client: TestClient) -> None:
 def test_the_assets_are_served(client: TestClient) -> None:
     script = client.get("/static/app.js")
     styles = client.get("/static/style.css")
+    icon = client.get("/static/favicon.svg")
 
     assert script.status_code == 200
     assert "javascript" in script.headers["content-type"]
@@ -39,6 +40,10 @@ def test_the_assets_are_served(client: TestClient) -> None:
     assert "localStorage" not in script.text
     assert styles.status_code == 200
     assert "text/css" in styles.headers["content-type"]
+    assert icon.status_code == 200
+    assert "image/svg+xml" in icon.headers["content-type"]
+    # Without it the browser asks for /favicon.ico and logs a 404.
+    assert "/static/favicon.svg" in client.get("/").text
 
 
 def test_denied_is_a_403_page(client: TestClient) -> None:
