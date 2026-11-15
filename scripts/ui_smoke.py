@@ -350,6 +350,8 @@ def main() -> int:
             'data: {"text": "## Orders\\n\\n- **#01** `shipped`\\n'
             "- [bad](javascript:alert(1))\\n"
             '- <img src=x onerror=alert(1)>\\n"}\n\n'
+            'data: {"text": "| Order | Status |\\n|---|---|\\n'
+            '| cus-01 | shipped |"}\n\n'
             "data: [DONE]\n\n"
         )
         page.route(
@@ -381,6 +383,17 @@ def main() -> int:
             rendered.locator("img").count() == 0
             and rendered.locator("script").count() == 0
             and "<img" in rendered.inner_text(),
+        )
+        check(
+            "markdown: table renders",
+            rendered.locator("table").count() == 1
+            and rendered.locator("th").all_inner_texts() == ["Order", "Status"]
+            and rendered.locator("tbody tr").count() == 1,
+            f"tables={rendered.locator('table').count()}",
+        )
+        check(
+            "markdown: table cells render",
+            rendered.locator("tbody td").all_inner_texts() == ["cus-01", "shipped"],
         )
         page.unroute("**/api/chat/stream")
 
