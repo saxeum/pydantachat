@@ -115,10 +115,10 @@ Read-only, single-customer scope bounds the damage. It does not make the tool
 safe for writes: `cancel_order` or `issue_refund` would need server-side business
 rules and confirmation of their own.
 
-For a browser-level check of the page (needs the app running and
-`uv run --with playwright`): `python scripts/ui_smoke.py`. It forges a session
-cookie from `SESSION_SECRET`, so it skips the Google round-trip, and it is not
-part of CI.
+For a browser-level check of the page (needs the app running): `make ui-smoke`, or
+`uv run python scripts/ui_smoke.py` with `BASE`/`CHROME` set to override the
+URL or the browser binary. It forges a session cookie from `SESSION_SECRET`, so
+it skips the Google round-trip, and it is not part of CI.
 
 ## Configuration
 

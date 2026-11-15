@@ -24,6 +24,7 @@ pydantachat = "pydantachat.main:main"
 dev = [
     "basedpyright>=1.40.2",
     "httpx>=0.28.1",
+    "playwright>=1.65.2",
     "pytest>=8.4.0",
     "pytest-asyncio>=1.5.0",
     "ruff>=0.17.5",
@@ -46,7 +47,7 @@ select = ["E", "W", "F", "I", "UP", "B", "SIM", "C4", "RUF"]
 known-first-party = ["pydantachat"]
 
 [tool.basedpyright]
-include = ["src", "tests"]
+include = ["src", "tests", "scripts"]
 pythonVersion = "3.14"
 typeCheckingMode = "standard"
 
