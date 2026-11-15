@@ -10,17 +10,30 @@ from pydantachat.settings import ModelConfig, get_settings
 
 SYSTEM_PROMPT = (
     "You answer questions about whether a single integer is even. Reply as "
-    "`EvennessAnswer`: the number you were asked about, whether it is even, and "
+    "`EvennessAnswer`: the number the user asked about, whether it is even, and "
     "at most one sentence of reasoning. Use the `get_even` tool to check parity "
-    "unless the answer is obvious to you."
+    "unless the answer is obvious to you. If the user's latest message contains "
+    "no integer, set both `number` and `is_even` to null and use `reasoning` to "
+    "say that no integer was given. Never reuse a number from an earlier turn."
 )
 
 
 class EvennessAnswer(BaseModel):
-    """The agent's structured reply: one number, its parity, and a short note."""
+    """The agent's structured reply: one number, its parity, and a short note.
 
-    number: int = Field(description="The integer the user asked about")
-    is_even: bool = Field(description="Whether that integer is even")
+    Both fields are null when the message contained no integer: the schema has
+    to be able to say "nothing to answer", otherwise a required field forces
+    the model to reuse a number from earlier in the conversation.
+    """
+
+    number: int | None = Field(
+        default=None,
+        description="The integer the user asked about; null if there is none",
+    )
+    is_even: bool | None = Field(
+        default=None,
+        description="Whether that integer is even; null if there is no integer",
+    )
     reasoning: str | None = Field(
         default=None, description="At most one sentence explaining the answer"
     )

@@ -135,6 +135,14 @@ dataset = Dataset[str, EvennessAnswer, None](
                 ),
             ],
         ),
+        Case(
+            name="no-integer",
+            # The schema must allow "nothing to answer"; a required number made
+            # the model reuse the previous one instead.
+            inputs="Tell me about your mother.",
+            expected_output=EvennessAnswer(),
+            evaluators=[AnswersEvenness()],
+        ),
     ],
 )
 

@@ -69,6 +69,15 @@ def _answering() -> FunctionModel:
     return FunctionModel(model)
 
 
+def _no_integer() -> FunctionModel:
+    def model(_messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
+        return ModelResponse(
+            parts=[ToolCallPart("final_result", {"number": None, "is_even": None})]
+        )
+
+    return FunctionModel(model)
+
+
 def _failing(exc: Exception) -> FunctionModel:
     def model(_messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
         raise exc
@@ -235,6 +244,19 @@ def test_chat_returns_a_typed_reply(configured: None) -> None:
     body = response.json()
     assert body["reply"] == {"number": 4, "is_even": True, "reasoning": None}
     assert len(sessions) == 1
+
+
+def test_chat_returns_null_fields_when_there_is_no_integer(configured: None) -> None:
+    client, _ = _client(create_app(), _no_integer())
+
+    response = client.post("/api/chat", json={"message": "tell me about your mother"})
+
+    assert response.status_code == 200
+    assert response.json()["reply"] == {
+        "number": None,
+        "is_even": None,
+        "reasoning": None,
+    }
 
 
 def test_a_second_turn_reuses_the_session(configured: None) -> None:

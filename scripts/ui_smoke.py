@@ -169,11 +169,26 @@ def main() -> int:
             and page.locator("#log article.bot").count() == 2,
         )
 
+        # --- a message with no integer -------------------------------------
+        # The model must say so, not repeat the last number it saw.
+        page.fill("#message", "Tell me about your mother.")
+        page.click("button[type=submit]")
+        said_nothing = wait_contains(
+            page.locator("#log article.bot p"), "no integer in that message"
+        )
+        body = page.locator("#log article.bot p").last.inner_text()
+        check("a message with no integer says so", said_nothing, body[:70])
+        check(
+            "a stale number is not reused",
+            "is even" not in body and "is odd" not in body,
+            body[:70],
+        )
+
         # --- new conversation ---------------------------------------------
         page.click("#new")
         check(
             "new conversation clears the transcript",
-            page.locator("#log li").count() == 0,
+            page.locator("#log article").count() == 0,
         )
         page.fill("#message", "Is 3 even?")
         page.click("button[type=submit]")
@@ -183,7 +198,7 @@ def main() -> int:
         )
         check(
             "new conversation drops the session id",
-            len(sent) > 2 and sent[2].get("session_id") is None,
+            bool(sent) and sent[-1].get("session_id") is None,
         )
 
         # --- 422 from the server (no model call) --------------------------
@@ -244,6 +259,39 @@ def main() -> int:
             "mid-stream error renders a readable message",
             wait_contains(
                 page.locator("#log article.system"), "provider failed", timeout=10
+            ),
+        )
+        page.unroute("**/api/chat/stream")
+
+        # --- a finished answer with null fields (intercepted) ---------------
+        null_answer = (
+            'event: session\ndata: {"session_id": "fake"}\n\n'
+            'data: {"number": null, "is_even": null, '
+            '"reasoning": "No integer was given."}\n\n'
+            "data: [DONE]\n\n"
+        )
+        page.route(
+            "**/api/chat/stream",
+            lambda route: route.fulfill(
+                status=200, content_type="text/event-stream", body=null_answer
+            ),
+        )
+        page.fill("#message", "tell me about your mother")
+        page.click("button[type=submit]")
+        check(
+            'a null answer renders as text, not "null is odd"',
+            wait_contains(
+                page.locator("#log article.bot p"),
+                "no integer in that message",
+                timeout=10,
+            ),
+        )
+        check(
+            "a null answer keeps its reasoning",
+            wait_contains(
+                page.locator("#log article.bot .reasoning"),
+                "No integer was given",
+                timeout=10,
             ),
         )
         page.unroute("**/api/chat/stream")
