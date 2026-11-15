@@ -108,7 +108,7 @@ def sample_stream(page: Page, timeout: float = 90.0) -> tuple[list[str], str]:
     while time.monotonic() < deadline:
         bot = page.locator("#log article.bot")
         if bot.count():
-            text = bot.last.locator("p").inner_text()
+            text = bot.last.locator(".body").inner_text()
             if text != last:
                 samples.append(text)
                 last = text
@@ -206,7 +206,7 @@ def main() -> int:
         # --- follow-up reuses the session ---------------------------------
         page.fill("#message", "What is the status of my latest order?")
         page.click("button[type=submit]")
-        ok = wait_contains(page.locator("#log article.bot p"), NEWEST_STATUS)
+        ok = wait_contains(page.locator("#log article.bot .body"), NEWEST_STATUS)
         check("follow-up answers", ok, f"expected {NEWEST_STATUS!r}")
         check(
             "follow-up sends a session id",
@@ -344,6 +344,46 @@ def main() -> int:
         check("no script element is injected", page.locator("#log script").count() == 0)
         page.unroute("**/api/chat/stream")
 
+        # --- markdown renders, HTML does not (intercepted) -------------------
+        markdown = (
+            'event: session\ndata: {"session_id": "md"}\n\n'
+            'data: {"text": "## Orders\\n\\n- **#01** `shipped`\\n'
+            "- [bad](javascript:alert(1))\\n"
+            '- <img src=x onerror=alert(1)>\\n"}\n\n'
+            "data: [DONE]\n\n"
+        )
+        page.route(
+            "**/api/chat/stream",
+            lambda route: route.fulfill(
+                status=200, content_type="text/event-stream", body=markdown
+            ),
+        )
+        page.fill("#message", "render this")
+        page.click("button[type=submit]")
+        check("markdown: heading renders", wait_for(page, "#log article.bot h4"))
+        rendered = page.locator("#log article.bot").last
+        check(
+            "markdown: list renders",
+            rendered.locator("li").count() == 3,
+            f"{rendered.locator('li').count()} items",
+        )
+        check(
+            "markdown: bold and code render",
+            rendered.locator("strong").count() == 1
+            and rendered.locator("code").count() == 1,
+        )
+        check(
+            "markdown: a javascript: link stays text",
+            rendered.locator("a").count() == 0,
+        )
+        check(
+            "markdown: html in a reply stays text",
+            rendered.locator("img").count() == 0
+            and rendered.locator("script").count() == 0
+            and "<img" in rendered.inner_text(),
+        )
+        page.unroute("**/api/chat/stream")
+
         # --- keyboard and overlapping submits (intercepted) ----------------
         fake = (
             'event: session\ndata: {"session_id": "fake"}\n\n'
@@ -369,7 +409,7 @@ def main() -> int:
         check(
             "enter sends",
             wait_contains(
-                page.locator("#log article.bot p"), "three orders", timeout=10
+                page.locator("#log article.bot .body"), "three orders", timeout=10
             ),
         )
 
@@ -384,7 +424,9 @@ def main() -> int:
         page.click("button[type=submit]")
         page.fill("#message", "second")
         page.click("button[type=submit]")
-        wait_contains(page.locator("#log article.bot p"), "three orders", timeout=10)
+        wait_contains(
+            page.locator("#log article.bot .body"), "three orders", timeout=10
+        )
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline and (
             page.locator("#log article.bot").count() < bots_before + 3
