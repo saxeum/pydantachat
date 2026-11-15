@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncGenerator
 
 from pydantic import BaseModel, Field
@@ -53,17 +54,26 @@ def build_agent(
 
 
 class Chat:
-    """One conversation = one history. Create one per UI session / eval case."""
+    """One conversation = one history. Create one per UI session / eval case.
+
+    Turns are serialised: a second `send`/`send_stream` on the same instance
+    waits for the first to finish, so two requests for one session queue up
+    instead of overwriting each other's transcript. That also means a consumer
+    must exhaust or close a stream — an abandoned `send_stream` holds the lock
+    until it is garbage collected.
+    """
 
     def __init__(self, agent: Agent[None, EvennessAnswer] | None = None):
         self.agent = agent if agent is not None else build_agent()
         self.history: list[ModelMessage] = []
+        self._lock = asyncio.Lock()
 
     async def send(self, prompt: str) -> EvennessAnswer:
         """For eval harnesses and other agents: one complete result."""
-        result = await self.agent.run(prompt, message_history=self.history)
-        self.history = result.all_messages()
-        return result.output
+        async with self._lock:
+            result = await self.agent.run(prompt, message_history=self.history)
+            self.history = result.all_messages()
+            return result.output
 
     async def send_stream(self, prompt: str) -> AsyncGenerator[EvennessAnswer]:
         """For a UI: partial answers as the model fills the schema in.
@@ -71,12 +81,13 @@ class Chat:
         Yields `EvennessAnswer` snapshots, not text: a structured output has no
         text deltas to stream. The last one is complete.
         """
-        async with self.agent.run_stream(
-            prompt, message_history=self.history
-        ) as result:
+        async with (
+            self._lock,
+            self.agent.run_stream(prompt, message_history=self.history) as result,
+        ):
             try:
                 async for partial in result.stream_output(debounce_by=None):
                     yield partial
             finally:
-                # Also runs if the consumer stops early and closes the iterator.
+                # Also runs if the consumer stops early and closes it.
                 self.history = result.all_messages()
