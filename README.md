@@ -106,11 +106,17 @@ uv run python -m pydantachat.evals --provider openrouter \
 
 Runs the evenness cases three times each — including one that must use the
 `get_even` tool and one that must not use any tool — and prints per-case
-results plus the aggregate pass rate. The
-tool cases also check the tool spans and their arguments, so a correct answer
-without the right tool call fails. Reports are written under `reports/` and are
-git-ignored. Each run prints the model, effective thinking mode, total model
-cost, and total thinking tokens. This is a measurement, not a CI gate.
+results plus the aggregate pass rate. The tool cases also check the tool spans
+and their arguments, so a correct answer without the right tool call fails.
+Reports are written under `reports/` and are git-ignored. Each run prints the
+model, effective thinking mode, total model cost, and total thinking tokens.
+This is a measurement, not a CI gate.
+
+`.github/workflows/live.yml` does the same once a week (and on manual dispatch):
+it runs the live smoke tests, then `evals-compare` against the previous run's
+report and uploads `reports/` as an artifact. It needs a `DEEPSEEK_API_KEY`
+repository secret. A failing assertion only shows up in the report; a missing
+key or a network error fails the run.
 
 ## Tracing
 
