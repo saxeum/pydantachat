@@ -1,8 +1,8 @@
 # pydantachat
 
-A minimal [Pydantic AI](https://ai.pydantic.dev) agent calling a configurable
-model provider, with
-OpenTelemetry traces sent to a local [Arize Phoenix](https://phoenix.arize.com).
+A customer service order status chat agent built on
+[Pydantic AI](https://ai.pydantic.dev), with OpenTelemetry traces sent to a
+local [Arize Phoenix](https://phoenix.arize.com).
 
 The agent answers questions about the signed-in customer's orders. The orders
 live in SQLite behind an HTTP API that trusts only a short-lived, customer-scoped
